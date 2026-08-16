@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>划词翻译 · 设置</title>
+    <link rel="stylesheet" href="./options.css" />
+  </head>
+  <body>
+    <main>
+      <h1>划词翻译</h1>
+      <p class="hint">翻译由你自己配置的 OpenAI 协议兼容服务完成。api-key 只保存在本机。</p>
+
+      <label for="baseUrl">服务地址 base_url</label>
+      <input id="baseUrl" type="url" spellcheck="false" placeholder="https://api.vipsyfw.com" />
+
+      <label for="apiKey">api-key</label>
+      <input id="apiKey" type="password" spellcheck="false" placeholder="sk-..." />
+
+      <label for="model">模型</label>
+      <div class="row">
+        <input id="model" spellcheck="false" placeholder="gpt-5.4-mini" />
+        <button id="fetchModels" type="button" class="ghost">拉取模型列表</button>
+      </div>
+      <select id="modelSelect" class="hidden" aria-label="已拉取的模型"></select>
+
+      <div class="row">
+        <button id="save" type="button" class="primary">保存</button>
+        <span id="status" class="status"></span>
+      </div>
+    </main>
+    <script type="module" src="./options.ts"></script>
+  </body>
+</html>
