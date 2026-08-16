@@ -16,8 +16,9 @@ TP_API_KEY=sk-... pnpm e2e   # 在真实 Chrome 里跑一遍主链路（需要�
 pnpm e2e:icon   # 只验划词图标出不出来，不需要 api-key（同样先 pnpm build）
 ```
 
-`pnpm e2e:icon` 覆盖各种选区来源：普通段落、input、textarea、shadow DOM、滚动后、键盘选区。
-其中 input/textarea 和 shadow DOM 里的选区在 document 上表现为 collapsed，见 ADR 0002。
+`pnpm e2e:icon` 覆盖各种选区来源：普通段落、input、textarea、shadow DOM、iframe（同源/跨源/srcdoc）、
+滚动后、键盘选区。其中 input/textarea 和 shadow DOM 里的选区在 document 上表现为 collapsed，见 ADR 0002；
+iframe 的浮层挂在框架自己身上、卡片会被框架视口夹住，见 ADR 0003。
 
 `pnpm e2e` 会加载 `dist/`，依次验证：未配置 api-key 的提示、英译中、中译英、
 疑问句只译不答、缓存命中、超长选区拒绝、深色主题渲染。截图写到 `TP_SHOT_DIR`（默认 `/tmp`）。

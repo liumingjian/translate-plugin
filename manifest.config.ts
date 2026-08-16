@@ -19,7 +19,11 @@ export default defineManifest({
       matches: ['<all_urls>'],
       js: ['src/content/index.ts'],
       run_at: 'document_idle',
-      all_frames: false,
+      // iframe 里的选区也要出图标；每个框架各挂一套浮层，见 ADR 0003。
+      all_frames: true,
+      // srcdoc / about:blank 框架（富文本编辑器常用）继承父页面的源，
+      // 不显式打开这个开关就注入不进去。
+      match_about_blank: true,
     },
   ],
   options_page: 'src/options/index.html',

@@ -46,9 +46,7 @@ document.addEventListener('mouseup', (event) => {
 
 document.addEventListener('mousedown', (event) => {
   if (overlay.contains(event.target)) return
-  overlay.hideIcon()
-  overlay.hideCard()
-  closePort()
+  dismiss()
 })
 
 /** 会改变选区的按键：Shift+方向/Home/End/PageUp/PageDown，以及 Ctrl/Cmd+A。 */
@@ -74,10 +72,24 @@ document.addEventListener('keyup', (event) => {
 
 document.addEventListener('keydown', (event) => {
   if (event.key !== 'Escape') return
+  dismiss()
+})
+
+// 子框架的浮层只能自己收场：用户点回主文档时，这个框架既收不到 mousedown
+// 也收不到 Escape，卡片会一直挂在那儿。切标签页不算 —— 那时整页都不可见，
+// 回来还想看见译文。
+if (window !== window.top) {
+  window.addEventListener('blur', () => {
+    if (document.visibilityState !== 'visible') return
+    dismiss()
+  })
+}
+
+function dismiss(): void {
   overlay.hideIcon()
   overlay.hideCard()
   closePort()
-})
+}
 
 const follow = throttleToFrame(() => {
   const rect = currentAnchorRect()
