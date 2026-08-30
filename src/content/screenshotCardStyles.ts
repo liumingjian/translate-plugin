@@ -34,7 +34,7 @@ export const SCREENSHOT_CARD_STYLES = `
   height: min(460px, calc(100vh - 16px));
   padding: 12px;
   display: grid;
-  grid-template-rows: 28px minmax(0, 132px) auto minmax(44px, 1fr) 30px;
+  grid-template-rows: 28px minmax(0, 132px) auto minmax(44px, 1fr) auto 30px;
   gap: 8px;
   border: 1px solid var(--tp-border);
   border-radius: 8px;
@@ -124,17 +124,21 @@ export const SCREENSHOT_CARD_STYLES = `
   overflow-y: auto;
 }
 
-.result.error {
+.error {
+  max-height: 64px;
+  overflow-y: auto;
   color: var(--tp-danger);
+  font-size: 12px;
 }
 
 .actions {
   display: flex;
   align-items: center;
   justify-content: flex-end;
+  gap: 6px;
 }
 
-.copy {
+.actions button {
   min-height: 30px;
   border: 1px solid var(--tp-border);
   border-radius: 6px;
@@ -145,8 +149,8 @@ export const SCREENSHOT_CARD_STYLES = `
   cursor: pointer;
 }
 
-.copy:hover,
-.copy:focus-visible {
+.actions button:hover,
+.actions button:focus-visible {
   color: var(--tp-fg);
   background: var(--tp-block);
 }

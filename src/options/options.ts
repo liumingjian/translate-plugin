@@ -23,6 +23,7 @@ void (async () => {
   apiKeyInput.value = settings.apiKey
   modelInput.value = settings.model
   imageModelInput.value = settings.imageModel
+  if (location.hash === '#imageModel') imageModelInput.focus()
 })()
 
 saveButton.addEventListener('click', () => {

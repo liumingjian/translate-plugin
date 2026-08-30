@@ -170,6 +170,7 @@ body.drag-active .image-stage {
 .result { min-height: min(58vh, 560px); padding: 16px; overflow: auto; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); white-space: pre-wrap; overflow-wrap: anywhere; }
 .result.loading::after { content: ""; animation: dots 1.2s steps(4, end) infinite; }
 .result.error { color: var(--danger); }
+.result-error { min-height: 22px; margin-top: 8px; color: var(--danger); font-size: 12px; }
 .result-actions { justify-content: flex-end; margin-top: 12px; }
 
 dialog { width: min(480px, calc(100vw - 32px)); padding: 22px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--fg); }

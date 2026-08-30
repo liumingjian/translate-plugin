@@ -42,6 +42,7 @@ const sourceMeta = byId<HTMLSpanElement>('sourceMeta')
 const imageStatus = byId<HTMLParagraphElement>('imageStatus')
 const language = byId<HTMLSpanElement>('language')
 const result = byId<HTMLDivElement>('result')
+const resultError = byId<HTMLParagraphElement>('resultError')
 const copyButton = byId<HTMLButtonElement>('copy')
 const openOptionsButton = byId<HTMLButtonElement>('openOptions')
 const privacyDialog = byId<HTMLDialogElement>('privacyDialog')
@@ -55,6 +56,7 @@ let translatedText = ''
 let privacyAccepted = false
 let translating = false
 let taskRevision = 0
+let lastErrorKind: TranslationErrorKind | null = null
 
 const imageSurface = new ImageSurface(
   imageFrame,
@@ -107,7 +109,12 @@ chooseButton.addEventListener('click', openFilePicker)
 reimportButton.addEventListener('click', openFilePicker)
 clearButton.addEventListener('click', clearWorkspace)
 translateButton.addEventListener('click', () => void startTranslation())
-openOptionsButton.addEventListener('click', () => void sendMessage({ type: 'open-options' }))
+openOptionsButton.addEventListener('click', () => {
+  const type = lastErrorKind === 'image-unsupported'
+    ? 'open-image-model-settings'
+    : 'open-options'
+  void sendMessage({ type })
+})
 copyButton.addEventListener('click', () => void copyTranslation())
 autoReadClipboard.addEventListener('change', () => void setAutoReadClipboard(autoReadClipboard.checked))
 
@@ -274,6 +281,9 @@ async function startTranslation(): Promise<void> {
   language.textContent = '自动 → 自动'
   result.textContent = ''
   result.className = 'result loading'
+  resultError.classList.add('hidden')
+  resultError.textContent = ''
+  lastErrorKind = null
   copyButton.disabled = true
   openOptionsButton.classList.add('hidden')
   translateButton.disabled = true
@@ -323,6 +333,7 @@ function handleEvent(event: TranslateEvent): void {
 function finishTranslation(): void {
   translating = false
   result.classList.remove('loading', 'muted', 'error')
+  resultError.classList.add('hidden')
   translateButton.disabled = false
   translateButton.textContent = '重新翻译选中区域'
   copyButton.disabled = translatedText === ''
@@ -330,12 +341,18 @@ function finishTranslation(): void {
 
 function showError(kind: TranslationErrorKind, detail?: string): void {
   translating = false
-  result.className = 'result error'
-  result.textContent = detail ? `${ERROR_MESSAGES[kind]}：${detail}` : ERROR_MESSAGES[kind]
-  translateButton.disabled = false
-  translateButton.textContent = '重试翻译'
-  copyButton.disabled = true
+  lastErrorKind = kind
+  result.classList.remove('loading', 'error')
+  result.classList.toggle('muted', translatedText === '')
+  resultError.textContent = detail ? `${ERROR_MESSAGES[kind]}：${detail}` : ERROR_MESSAGES[kind]
+  resultError.classList.remove('hidden')
+  const reselect = kind === 'no-text'
+  translateButton.disabled = reselect
+  translateButton.textContent = reselect ? '请重新框选' : '重试翻译'
+  copyButton.disabled = translatedText === ''
+  if (reselect) imageStatus.textContent = '请重新框选包含文字的区域'
   openOptionsButton.classList.toggle('hidden', kind !== 'no-api-key' && kind !== 'auth' && kind !== 'image-unsupported')
+  openOptionsButton.textContent = kind === 'image-unsupported' ? '配置截图模型' : '打开配置页'
 }
 
 function clearWorkspace(): void {
@@ -360,9 +377,12 @@ function clearWorkspace(): void {
 }
 
 function resetResult(message: string): void {
+  lastErrorKind = null
   language.textContent = '自动 → 自动'
   result.className = 'result muted'
   result.textContent = message
+  resultError.textContent = ''
+  resultError.classList.add('hidden')
   copyButton.disabled = true
   openOptionsButton.classList.add('hidden')
 }

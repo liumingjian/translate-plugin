@@ -208,6 +208,7 @@ export class ScreenshotMode {
     this.setState('exited')
     this.endPointer()
     this.host.remove()
+    this.frozenImage.removeAttribute('src')
     this.imageDataUrl = null
     this.rect = null
     if (notify) this.handlers.onCancel?.()

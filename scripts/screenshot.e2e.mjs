@@ -11,6 +11,7 @@ const CHROME =
 
 const requests = []
 let lastCaptureAt = 0
+let responseMode = 'success'
 const pageHtml = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>截图翻译测试</title>
 <style>
 html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#f7f7f7;font:16px sans-serif}
@@ -36,12 +37,45 @@ const server = http.createServer((request, response) => {
   request.on('data', (chunk) => (body += chunk))
   request.on('end', () => {
     requests.push(JSON.parse(body))
+    if (responseMode === 'unavailable') {
+      response.writeHead(503, { 'content-type': 'application/json' })
+      response.end(JSON.stringify({ error: { message: 'service temporarily unavailable' } }))
+      return
+    }
+    if (responseMode === 'image-unsupported') {
+      response.writeHead(400, { 'content-type': 'application/json' })
+      response.end(JSON.stringify({ error: { message: 'model does not support image input' } }))
+      return
+    }
+    if (responseMode === 'auth') {
+      response.writeHead(401, { 'content-type': 'application/json' })
+      response.end(JSON.stringify({ error: { message: 'invalid api key' } }))
+      return
+    }
     response.writeHead(200, {
       'content-type': 'text/event-stream',
       'cache-control': 'no-cache',
       connection: 'keep-alive',
     })
     response.flushHeaders()
+    if (responseMode === 'network') {
+      response.end()
+      return
+    }
+    if (responseMode === 'empty') {
+      response.end('data: [DONE]\n\n')
+      return
+    }
+    if (responseMode === 'no-text') {
+      response.end(
+        'data: {"choices":[{"delta":{"content":"NO_TEXT"}}]}\n\ndata: [DONE]\n\n',
+      )
+      return
+    }
+    if (responseMode === 'partial') {
+      response.end('data: {"choices":[{"delta":{"content":"EN>ZH\\n半段译文"}}]}\n\n')
+      return
+    }
     response.write('data: {"choices":[{"delta":{"content":"EN>ZH\\n第一段"}}]}\n\n')
     setTimeout(() => {
       response.write('data: {"choices":[{"delta":{"content":"第二段"}}]}\n\n')
@@ -290,6 +324,96 @@ try {
   )
   await pageCdp.send('Emulation.setPageScaleFactor', { pageScaleFactor: 1 })
 
+  for (const [mode, errorText] of [
+    ['network', '请求失败'],
+    ['unavailable', '翻译服务暂时不可用'],
+    ['empty', '模型没有返回译文'],
+  ]) {
+    responseMode = mode
+    const before = requests.length
+    await confirmRecoveryScreenshot(browser, worker, extensionOrigin, page)
+    await waitForCardError(page, errorText)
+    await waitForRequestCount(before + 3)
+    const failedImage = imageUrlOf(requests[before])
+    const failedCard = await screenshotCard(page)
+    assert(failedCard.previewVisible, `${mode} must retain the current screenshot`)
+    assert(failedCard.buttons.includes('重试'), `${mode} must offer a manual retry`)
+
+    responseMode = 'success'
+    await clickCardButton(page, '重试')
+    await waitForRequestCount(before + 4)
+    await page.waitForFunction(() => window.__findTranslationCard()?.result === '第一段第二段')
+    assert.equal(imageUrlOf(requests[before + 3]), failedImage, `${mode} retry must reuse the crop`)
+  }
+
+  responseMode = 'partial'
+  let before = requests.length
+  await confirmRecoveryScreenshot(browser, worker, extensionOrigin, page)
+  await waitForCardError(page, '响应流意外结束')
+  assert.equal(requests.length, before + 1, 'a partial stream must never replay automatically')
+  let failedCard = await screenshotCard(page)
+  assert.equal(failedCard.result, '半段译文')
+  assert(failedCard.copyVisible, 'partial output must remain copyable')
+  await clickCardButton(page, '复制译文')
+  await page.waitForFunction(() => window.__findTranslationCard()?.copyLabel === '已复制')
+  assert.equal(await page.evaluate(() => navigator.clipboard.readText()), '半段译文')
+  responseMode = 'success'
+  await clickCardButton(page, '重试')
+  await page.waitForFunction(() => window.__findTranslationCard()?.result === '第一段第二段')
+  assert.equal(
+    (await screenshotCard(page)).result,
+    '第一段第二段',
+    'manual retry must replace partial output instead of appending duplicate text',
+  )
+
+  responseMode = 'no-text'
+  before = requests.length
+  const frozenForReselect = await confirmRecoveryScreenshot(browser, worker, extensionOrigin, page)
+  await waitForCardError(page, '未识别到可翻译文字')
+  assert.equal(requests.length, before + 1)
+  assert((await screenshotCard(page)).buttons.includes('重新框选'))
+  await clickCardButton(page, '重新框选')
+  await waitForScreenshotMode(page)
+  assert.equal(
+    await frozenSource(page),
+    frozenForReselect,
+    'reselect must use the original frozen capture without capturing the live page again',
+  )
+  responseMode = 'success'
+  await drag(page, 430, 120, 610, 280)
+  await page.keyboard.press('Enter')
+  await waitForRequestCount(before + 2)
+  await page.waitForFunction(() => window.__findTranslationCard()?.result === '第一段第二段')
+
+  responseMode = 'image-unsupported'
+  await confirmRecoveryScreenshot(browser, worker, extensionOrigin, page)
+  await waitForCardError(page, '截图模型不支持图片')
+  let existingTargets = new Set(browser.targets())
+  await clickCardButton(page, '配置截图模型')
+  let optionsTarget = await browser.waitForTarget(
+    (target) => !existingTargets.has(target) && target.url().endsWith('/src/options/index.html#imageModel'),
+  )
+  let optionsPage = await optionsTarget.page()
+  assert(optionsPage)
+  await optionsPage.waitForFunction(() => document.activeElement?.id === 'imageModel')
+  await optionsPage.close()
+
+  responseMode = 'auth'
+  await page.bringToFront()
+  await confirmRecoveryScreenshot(browser, worker, extensionOrigin, page)
+  await waitForCardError(page, '鉴权失败')
+  existingTargets = new Set(browser.targets())
+  await clickCardButton(page, '打开配置页')
+  optionsTarget = await browser.waitForTarget(
+    (target) => !existingTargets.has(target) && target.url().includes('/src/options/index.html'),
+  )
+  optionsPage = await optionsTarget.page()
+  assert(optionsPage)
+  await optionsPage.waitForSelector('#apiKey')
+  await optionsPage.close()
+  responseMode = 'success'
+  await page.bringToFront()
+
   // 截图链路结束后，iframe 内原有的每框架划词浮层仍然工作。
   const iframe = page.frames().find((frame) => frame !== page.mainFrame())
   assert(iframe)
@@ -320,6 +444,7 @@ try {
     confirmedPixels: [`${pixels.width}x${pixels.height}`, `${scaledPixels.width}x${scaledPixels.height}@2x`],
     streamedText: '第一段第二段',
     card: ['edge-flipped', 'viewport-constrained', 'dragged', 'persistent', 'copied', 'closed'],
+    recovery: ['network', 'unavailable', 'empty', 'partial', 'no-text', 'image-model', 'auth'],
     iframeSelectionPreserved: true,
   }))
 } finally {
@@ -351,6 +476,27 @@ async function beginScreenshot(browser, worker, extensionOrigin, page) {
 
 async function waitForScreenshotMode(page) {
   await page.waitForFunction(() => window.__findScreenshotDialog(), { timeout: 10_000 })
+}
+
+async function confirmRecoveryScreenshot(browser, worker, extensionOrigin, page) {
+  await beginScreenshot(browser, worker, extensionOrigin, page)
+  const frozen = await frozenSource(page)
+  await drag(page, 430, 120, 610, 280)
+  await page.keyboard.press('Enter')
+  await page.waitForFunction(() => !window.__findScreenshotDialog())
+  return frozen
+}
+
+async function waitForCardError(page, expected) {
+  await page.waitForFunction(
+    (text) => window.__findTranslationCard()?.error?.includes(text),
+    { timeout: 15_000 },
+    expected,
+  )
+}
+
+function imageUrlOf(request) {
+  return request.messages.at(-1).content.find((item) => item.type === 'image_url').image_url.url
 }
 
 async function countScreenshotModes(page) {
@@ -571,6 +717,10 @@ async function installPageHelpers(page) {
           title: '截图翻译',
           badge: card.querySelector('[aria-label="翻译语言方向"]')?.textContent,
           result: card.querySelector('[role="status"]')?.textContent,
+          error: card.querySelector('[role="alert"]')?.textContent,
+          buttons: [...card.querySelectorAll('button')]
+            .filter((button) => button.getBoundingClientRect().height > 0)
+            .map((button) => button.textContent),
           copyLabel: copy?.textContent,
           copyVisible: !!copy && copy.getBoundingClientRect().height > 0,
           previewVisible: !!preview && preview.getBoundingClientRect().height > 0,

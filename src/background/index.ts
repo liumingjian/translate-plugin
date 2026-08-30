@@ -19,7 +19,7 @@ import type {
   TranslateRequest,
   TranslationErrorKind,
 } from '../shared/types'
-import { SseParser, deltaOf, finishReasonOf } from './sse'
+import { SseParser, deltaOf } from './sse'
 import { PendingImages } from './pendingImages'
 
 type CachedTranslation = { source?: string; target?: string; text: string }
@@ -42,6 +42,11 @@ chrome.runtime.onMessage.addListener(
     switch (message?.type) {
       case 'open-options':
         void chrome.runtime.openOptionsPage()
+        return
+      case 'open-image-model-settings':
+        void chrome.tabs.create({
+          url: chrome.runtime.getURL('src/options/index.html#imageModel'),
+        })
         return
       case 'open-shortcuts':
         void chrome.tabs.create({ url: 'chrome://extensions/shortcuts' })
@@ -268,7 +273,6 @@ async function attemptTranslate(
   const sse = new SseParser()
   const header = new LangHeaderParser()
   const collected: CachedTranslation = { text: '' }
-  let finished = false
   let emitted = false
   const noTextBuffer = imageRequest ? new NoTextOutputBuffer() : null
   let sawNoText = false
@@ -296,7 +300,6 @@ async function attemptTranslate(
       const { value, done } = await reader.read()
       if (done) break
       for (const payload of sse.feed(decoder.decode(value, { stream: true }))) {
-        if (finishReasonOf(payload) !== null) finished = true
         parseDelta(deltaOf(payload))
       }
     }
@@ -315,12 +318,21 @@ async function attemptTranslate(
     }
   }
 
+  if (!sse.complete) {
+    return {
+      kind: 'failed',
+      retryable: !emitted,
+      errorKind: 'network',
+      detail: '响应流意外结束',
+    }
+  }
+
   const outputError = classifyOutput(sawNoText ? 'NO_TEXT' : collected.text, imageRequest)
   if (outputError) {
     return { kind: 'failed', retryable: outputError === 'empty' && !emitted, errorKind: outputError }
   }
 
-  return { kind: 'ok', collected, complete: sse.sawDone || finished }
+  return { kind: 'ok', collected, complete: true }
 }
 
 function sleep(ms: number, signal: AbortSignal): Promise<void> {

@@ -36,6 +36,7 @@ export const PORT_NAME = 'translate'
 
 export type RuntimeRequest =
   | { type: 'open-options' }
+  | { type: 'open-image-model-settings' }
   | { type: 'open-shortcuts' }
   | { type: 'open-workspace' }
   | { type: 'capture-active-tab' }

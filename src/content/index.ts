@@ -19,6 +19,8 @@ let activePort: chrome.runtime.Port | null = null
 let streaming = false
 const screenshotClient = new TranslationClient()
 let screenshotRevision = 0
+let currentScreenshot: ConfirmedScreenshot | null = null
+let currentScreenshotCrop: string | null = null
 
 const overlay = new Overlay({
   onIconClick: () => {
@@ -50,6 +52,14 @@ const screenshotCard = window === window.top
       onClose: () => {
         screenshotRevision++
         screenshotClient.cancel()
+        currentScreenshot = null
+        currentScreenshotCrop = null
+      },
+      onRetry: retryScreenshot,
+      onReselect: reselectScreenshot,
+      onOpenOptions: (imageModel) => {
+        const type = imageModel ? 'open-image-model-settings' : 'open-options'
+        void chrome.runtime.sendMessage({ type }).catch(() => {})
       },
     })
   : null
@@ -124,11 +134,15 @@ function beginScreenshot(imageDataUrl: string): void {
   screenshotCard?.close()
   screenshotClient.cancel()
   screenshotRevision++
+  currentScreenshot = null
+  currentScreenshotCrop = null
   screenshotMode.begin(imageDataUrl)
 }
 
 async function confirmScreenshot(screenshot: ConfirmedScreenshot): Promise<void> {
   const revision = ++screenshotRevision
+  currentScreenshot = screenshot
+  currentScreenshotCrop = null
   const anchor: Rect = {
     left: screenshot.rect.x,
     top: screenshot.rect.y,
@@ -145,7 +159,14 @@ async function confirmScreenshot(screenshot: ConfirmedScreenshot): Promise<void>
     return
   }
   if (revision !== screenshotRevision) return
+  currentScreenshotCrop = cropped
   screenshotCard?.open(cropped, anchor)
+  startScreenshotTranslation(cropped)
+}
+
+function startScreenshotTranslation(cropped: string): void {
+  const revision = ++screenshotRevision
+  screenshotCard?.setLoading()
   screenshotClient.start(
     { type: 'translate-image', imageDataUrl: cropped },
     {
@@ -175,6 +196,18 @@ async function confirmScreenshot(screenshot: ConfirmedScreenshot): Promise<void>
       },
     },
   )
+}
+
+function retryScreenshot(): void {
+  if (!currentScreenshotCrop) return
+  startScreenshotTranslation(currentScreenshotCrop)
+}
+
+function reselectScreenshot(): void {
+  if (!currentScreenshot || !screenshotMode) return
+  const frozenImage = currentScreenshot.imageDataUrl
+  screenshotCard?.close()
+  screenshotMode.begin(frozenImage)
 }
 
 const follow = throttleToFrame(() => {

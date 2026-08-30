@@ -18,6 +18,7 @@ const tempDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'translate-plugin-wo
 const fixturePath = path.join(tempDirectory, 'crop-image.png')
 
 const requests = []
+let responseMode = 'success'
 const server = http.createServer((request, response) => {
   if (request.method !== 'POST' || request.url !== '/v1/chat/completions') {
     response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
@@ -30,12 +31,31 @@ const server = http.createServer((request, response) => {
   request.on('data', (chunk) => (body += chunk))
   request.on('end', () => {
     requests.push(JSON.parse(body))
+    if (responseMode === 'image-unsupported') {
+      response.writeHead(400, { 'content-type': 'application/json' })
+      response.end(JSON.stringify({ error: { message: 'model does not support image input' } }))
+      return
+    }
     response.writeHead(200, {
       'content-type': 'text/event-stream',
       'cache-control': 'no-cache',
       connection: 'keep-alive',
     })
     response.flushHeaders()
+    if (responseMode === 'network') {
+      response.end()
+      return
+    }
+    if (responseMode === 'no-text') {
+      response.end(
+        'data: {"choices":[{"delta":{"content":"NO_TEXT"}}]}\n\ndata: [DONE]\n\n',
+      )
+      return
+    }
+    if (responseMode === 'partial') {
+      response.end('data: {"choices":[{"delta":{"content":"EN>ZH\\n工作区半段"}}]}\n\n')
+      return
+    }
     response.write(
       'data: {"choices":[{"delta":{"content":"EN>ZH\\n第一段"}}]}\n\n',
     )
@@ -267,6 +287,88 @@ try {
   )
   await workspace.keyboard.press('Enter')
   await waitForRequestCount(3)
+  await workspace.waitForFunction(
+    () => document.querySelector('#translate')?.disabled === false,
+    { timeout: 10_000 },
+  )
+
+  const retainedSource = await workspace.$eval('#sourceImage', (image) => image.src)
+  responseMode = 'network'
+  let beforeRecovery = requests.length
+  await workspace.click('#translate')
+  await workspace.waitForFunction(
+    () => document.querySelector('#resultError')?.textContent?.includes('请求失败'),
+    { timeout: 15_000 },
+  )
+  await waitForRequestCount(beforeRecovery + 3)
+  assert.equal(await workspace.$eval('#sourceImage', (image) => image.src), retainedSource)
+  assert.equal(await workspace.$eval('#translate', (button) => button.textContent), '重试翻译')
+  const failedImage = imageUrlOf(requests[beforeRecovery])
+  responseMode = 'success'
+  await workspace.click('#translate')
+  await waitForRequestCount(beforeRecovery + 4)
+  await workspace.waitForFunction(
+    () => document.querySelector('#result')?.textContent === '第一段第二段',
+  )
+  assert.equal(imageUrlOf(requests[beforeRecovery + 3]), failedImage)
+
+  responseMode = 'partial'
+  beforeRecovery = requests.length
+  await workspace.click('#translate')
+  await workspace.waitForFunction(
+    () => document.querySelector('#resultError')?.textContent?.includes('响应流意外结束'),
+  )
+  assert.equal(requests.length, beforeRecovery + 1, 'partial workspace output must not auto-replay')
+  assert.equal(await workspace.$eval('#result', (element) => element.textContent), '工作区半段')
+  assert.equal(await workspace.$eval('#copy', (button) => button.disabled), false)
+  await workspace.click('#copy')
+  await workspace.waitForFunction(() => document.querySelector('#copy')?.textContent === '已复制')
+  responseMode = 'success'
+  await workspace.click('#translate')
+  await workspace.waitForFunction(
+    () => document.querySelector('#result')?.textContent === '第一段第二段',
+  )
+  assert.equal(
+    await workspace.$eval('#result', (element) => element.textContent),
+    '第一段第二段',
+    'workspace retry must replace partial output',
+  )
+
+  responseMode = 'image-unsupported'
+  await workspace.click('#translate')
+  await workspace.waitForFunction(
+    () => document.querySelector('#resultError')?.textContent?.includes('截图模型配置'),
+  )
+  const beforeOptions = new Set(browser.targets())
+  await workspace.click('#openOptions')
+  const optionsTarget = await browser.waitForTarget(
+    (target) => !beforeOptions.has(target) && target.url().endsWith('/src/options/index.html#imageModel'),
+  )
+  const optionsPage = await optionsTarget.page()
+  assert(optionsPage)
+  await optionsPage.waitForFunction(() => document.activeElement?.id === 'imageModel')
+  await optionsPage.close()
+  await workspace.bringToFront()
+
+  responseMode = 'no-text'
+  await workspace.click('#translate')
+  await workspace.waitForFunction(
+    () =>
+      document.querySelector('#resultError')?.textContent?.includes('未识别到可翻译文字') &&
+      document.querySelector('#imageStatus')?.textContent?.includes('重新框选'),
+  )
+  assert.equal(await workspace.$eval('#sourceImage', (image) => image.src), retainedSource)
+  assert.equal(await workspace.$eval('#translate', (button) => button.disabled), true)
+
+  const fileChooser = workspace.waitForFileChooser()
+  await workspace.click('#reimport')
+  await (await fileChooser).accept([fixturePath])
+  await workspace.waitForFunction(
+    () =>
+      document.querySelector('#sourceMeta')?.textContent === 'crop-image.png' &&
+      document.querySelector('#result')?.textContent?.includes('已选择整张图片'),
+  )
+  responseMode = 'success'
 
   await workspace.click('#clear')
   await workspace.waitForFunction(() => !document.querySelector('#emptyState')?.classList.contains('hidden'))
@@ -498,6 +600,7 @@ try {
       ok: true,
       popupEntries: entries,
       streamedText: '第一段第二段',
+      recovery: ['network', 'partial', 'no-text', 'image-model', 'retry', 'copy', 'reimport', 'clear'],
       cropPixels: `${encodedCrop.width}x${encodedCrop.height}`,
       explicitSubmitMethods: ['button', 'double-click', 'Enter'],
       imageImports: ['file', 'drop', 'manual-paste', 'auto-read'],
@@ -532,4 +635,8 @@ async function waitForRequestCount(count) {
     await new Promise((resolve) => setTimeout(resolve, 25))
   }
   assert.equal(requests.length, count)
+}
+
+function imageUrlOf(request) {
+  return request.messages.at(-1).content.find((item) => item.type === 'image_url').image_url.url
 }

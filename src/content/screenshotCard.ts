@@ -6,6 +6,9 @@ import { SCREENSHOT_CARD_STYLES } from './screenshotCardStyles'
 
 type ScreenshotCardHandlers = {
   onClose: () => void
+  onRetry: () => void
+  onReselect: () => void
+  onOpenOptions: (imageModel: boolean) => void
 }
 
 const ERROR_MESSAGES: Record<TranslationErrorKind, string> = {
@@ -29,7 +32,11 @@ export class ScreenshotCard {
   private readonly preview = document.createElement('img')
   private readonly badge = document.createElement('div')
   private readonly result = document.createElement('div')
+  private readonly error = document.createElement('div')
   private readonly copyButton = document.createElement('button')
+  private readonly retryButton = document.createElement('button')
+  private readonly reselectButton = document.createElement('button')
+  private readonly optionsButton = document.createElement('button')
   private anchor: Rect | null = null
   private dragged = false
   private dragPointerId: number | null = null
@@ -71,6 +78,7 @@ export class ScreenshotCard {
     if (!this.visible) return
     this.host.remove()
     this.anchor = null
+    this.preview.removeAttribute('src')
     this.endDrag()
     this.handlers.onClose()
   }
@@ -84,7 +92,11 @@ export class ScreenshotCard {
   setLoading(): void {
     this.result.className = 'result dots'
     this.result.textContent = ''
+    this.error.classList.add('hidden')
     this.copyButton.classList.add('hidden')
+    this.retryButton.classList.add('hidden')
+    this.reselectButton.classList.add('hidden')
+    this.optionsButton.classList.add('hidden')
   }
 
   appendDelta(text: string): void {
@@ -95,13 +107,24 @@ export class ScreenshotCard {
   finish(): void {
     this.result.classList.remove('dots')
     this.copyButton.classList.remove('hidden')
+    this.reselectButton.classList.remove('hidden')
   }
 
   showError(kind: TranslationErrorKind, detail?: string): void {
     const message = ERROR_MESSAGES[kind]
-    this.result.className = 'result error'
-    this.result.textContent = detail ? `${message}：${detail}` : message
-    this.copyButton.classList.add('hidden')
+    this.result.classList.remove('dots')
+    this.error.textContent = detail ? `${message}：${detail}` : message
+    this.error.classList.remove('hidden')
+    this.copyButton.classList.toggle('hidden', this.result.textContent === '')
+    this.retryButton.classList.toggle(
+      'hidden',
+      kind !== 'network' && kind !== 'unavailable' && kind !== 'empty',
+    )
+    this.reselectButton.classList.remove('hidden')
+    const settingsError = kind === 'no-api-key' || kind === 'auth' || kind === 'image-unsupported'
+    this.optionsButton.classList.toggle('hidden', !settingsError)
+    this.optionsButton.textContent = kind === 'image-unsupported' ? '配置截图模型' : '打开配置页'
+    this.optionsButton.dataset.imageModel = String(kind === 'image-unsupported')
   }
 
   private buildCard(): HTMLElement {
@@ -134,21 +157,36 @@ export class ScreenshotCard {
     this.result.className = 'result'
     this.result.setAttribute('role', 'status')
     this.result.setAttribute('aria-live', 'polite')
+    this.error.className = 'error hidden'
+    this.error.setAttribute('role', 'alert')
 
     const actions = document.createElement('div')
     actions.className = 'actions'
-    this.copyButton.className = 'copy hidden'
+    this.retryButton.className = 'hidden'
+    this.retryButton.type = 'button'
+    this.retryButton.textContent = '重试'
+    this.retryButton.addEventListener('click', this.handlers.onRetry)
+    this.reselectButton.className = 'hidden'
+    this.reselectButton.type = 'button'
+    this.reselectButton.textContent = '重新框选'
+    this.reselectButton.addEventListener('click', this.handlers.onReselect)
+    this.optionsButton.className = 'hidden'
+    this.optionsButton.type = 'button'
+    this.optionsButton.addEventListener('click', () => {
+      this.handlers.onOpenOptions(this.optionsButton.dataset.imageModel === 'true')
+    })
+    this.copyButton.className = 'hidden'
     this.copyButton.type = 'button'
     this.copyButton.textContent = '复制译文'
     this.copyButton.addEventListener('click', () => void this.copyResult())
-    actions.append(this.copyButton)
+    actions.append(this.optionsButton, this.reselectButton, this.retryButton, this.copyButton)
 
     this.header.addEventListener('pointerdown', (event) => this.beginDrag(event))
     this.header.addEventListener('pointermove', (event) => this.moveDrag(event))
     this.header.addEventListener('pointerup', (event) => this.endDrag(event.pointerId))
     this.header.addEventListener('pointercancel', (event) => this.endDrag(event.pointerId))
 
-    this.card.append(this.header, previewBlock, this.badge, this.result, actions)
+    this.card.append(this.header, previewBlock, this.badge, this.result, this.error, actions)
     return this.card
   }
 
