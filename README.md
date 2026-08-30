@@ -25,7 +25,7 @@ iframe 的浮层挂在框架自己身上、卡片会被框架视口夹住，见 
 `pnpm e2e` 会构建并加载 `dist/`，用确定性本地 SSE 服务依次验证：未配置 api-key 的提示、
 英译中、中译英、疑问句只译不答、缓存命中、超长选区拒绝、深色主题和图片导入。
 `pnpm e2e:real` 复用同一套用户流程，只向真实服务发送 `tests/fixtures/` 中的固定素材，
-并验证文本模型 `gpt-5.4-mini` 与截图模型 `gpt-5.5`。凭据优先读取 `TP_BASE_URL` / `TP_API_KEY`，
+并验证文本模型与截图模型 `gpt-5.4-mini`。凭据优先读取 `TP_BASE_URL` / `TP_API_KEY`，
 缺少时回退到 `OPENAI_BASE_URL` / `OPENAI_API_KEY`；所有输出均不包含凭据、授权头或图片数据。
 
 驱动 Chrome 有两个坑，改这个脚本前先看清楚：
@@ -76,7 +76,7 @@ TP_E2E_CLIPBOARD_PROFILE=/tmp/translate-plugin-permission-grant pnpm e2e:workspa
 加载扩展：`chrome://extensions` → 打开开发者模式 → 「加载已解压的扩展程序」→ 选 `dist/`。
 
 首次使用需要在扩展的设置页填入 `api-key`；`base_url` 默认 `https://api.vipsyfw.com`，
-模型默认 `gpt-5.4-mini`。配置只存 `chrome.storage.local`，不同步到账号。
+文本和截图模型默认 `gpt-5.4-mini`。配置只存 `chrome.storage.local`，不同步到账号。
 
 改用其它服务地址时，浏览器会弹窗申请该域名的访问权限 —— 拒绝则配置不会保存。
 

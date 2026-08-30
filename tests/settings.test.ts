@@ -19,7 +19,7 @@ describe('settings migration', () => {
       baseUrl: 'https://legacy.example.com',
       apiKey: 'legacy-key',
       model: 'legacy-text-model',
-      imageModel: 'gpt-5.5',
+      imageModel: 'gpt-5.4-mini',
       imagePrivacyAccepted: false,
       autoReadClipboard: false,
     })
@@ -40,7 +40,14 @@ describe('settings migration', () => {
   })
 
   it.each(['', '   '])('falls back to the default image model for %j', (imageModel) => {
-    expect(migrateSettings({ imageModel }).imageModel).toBe('gpt-5.5')
+    expect(migrateSettings({ imageModel }).imageModel).toBe('gpt-5.4-mini')
+  })
+
+  it('migrates the legacy image default without overwriting custom models', () => {
+    expect(migrateSettings({ imageModel: 'gpt-5.5' }).imageModel).toBe('gpt-5.4-mini')
+    expect(migrateSettings({ imageModel: 'custom-vision-model' }).imageModel).toBe(
+      'custom-vision-model',
+    )
   })
 
   it('trims a configured image model', () => {

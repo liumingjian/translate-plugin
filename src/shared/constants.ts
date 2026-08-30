@@ -6,7 +6,7 @@ export const CACHE_CAPACITY = 100
 
 export const DEFAULT_BASE_URL = 'https://api.vipsyfw.com'
 export const DEFAULT_MODEL = 'gpt-5.4-mini'
-export const DEFAULT_IMAGE_MODEL = 'gpt-5.5'
+export const DEFAULT_IMAGE_MODEL = 'gpt-5.4-mini'
 
 export const IMAGE_PRIVACY_DISCLOSURE =
   '确认后，选中的图片区域会发送到你配置的翻译服务。图片仅保留在内存中，不会写入翻译缓存。是否继续？'
