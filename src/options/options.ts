@@ -10,9 +10,11 @@ import {
 const baseUrlInput = byId<HTMLInputElement>('baseUrl')
 const apiKeyInput = byId<HTMLInputElement>('apiKey')
 const modelInput = byId<HTMLInputElement>('model')
+const imageModelInput = byId<HTMLInputElement>('imageModel')
 const modelSelect = byId<HTMLSelectElement>('modelSelect')
 const fetchButton = byId<HTMLButtonElement>('fetchModels')
 const saveButton = byId<HTMLButtonElement>('save')
+const shortcutsButton = byId<HTMLButtonElement>('shortcuts')
 const status = byId<HTMLSpanElement>('status')
 
 void (async () => {
@@ -20,6 +22,7 @@ void (async () => {
   baseUrlInput.value = settings.baseUrl
   apiKeyInput.value = settings.apiKey
   modelInput.value = settings.model
+  imageModelInput.value = settings.imageModel
 })()
 
 saveButton.addEventListener('click', () => {
@@ -44,10 +47,15 @@ saveButton.addEventListener('click', () => {
       baseUrl,
       apiKey: apiKeyInput.value.trim(),
       model: modelInput.value.trim() || DEFAULT_SETTINGS.model,
+      imageModel: imageModelInput.value.trim() || DEFAULT_SETTINGS.imageModel,
     })
     baseUrlInput.value = baseUrl
     report('已保存', 'ok')
   })
+})
+
+shortcutsButton.addEventListener('click', () => {
+  void chrome.runtime.sendMessage({ type: 'open-shortcuts' })
 })
 
 fetchButton.addEventListener('click', () => {

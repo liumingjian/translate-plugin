@@ -9,7 +9,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "e2e": "node scripts/e2e.mjs",
-    "e2e:icon": "node scripts/icon.e2e.mjs"
+    "e2e:icon": "node scripts/icon.e2e.mjs",
+    "e2e:workspace": "vite build --mode e2e && node scripts/workspace.e2e.mjs"
   },
   "devDependencies": {
     "@crxjs/vite-plugin": "^2.0.0-beta.28",

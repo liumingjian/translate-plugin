@@ -20,6 +20,7 @@ import type {
   TranslationErrorKind,
 } from '../shared/types'
 import { SseParser, deltaOf, finishReasonOf } from './sse'
+import { PendingImages } from './pendingImages'
 
 type CachedTranslation = { source?: string; target?: string; text: string }
 
@@ -30,7 +31,7 @@ const MAX_ATTEMPTS = 3
 const RETRY_BACKOFF_MS = [400, 1200]
 
 const cache = new Lru<CachedTranslation>(CACHE_CAPACITY)
-const pendingImages = new Map<string, string>()
+const pendingImages = new PendingImages(60_000)
 
 chrome.commands.onCommand.addListener((command, tab) => {
   if (command === 'screenshot-translate') void captureActiveTab(tab)
@@ -54,8 +55,7 @@ chrome.runtime.onMessage.addListener(
           .catch((error: unknown) => sendResponse({ ok: false, error: describe(error) }))
         return true
       case 'consume-pending-image': {
-        const imageDataUrl = pendingImages.get(message.token)
-        pendingImages.delete(message.token)
+        const imageDataUrl = pendingImages.consume(message.token)
         sendResponse({ ok: !!imageDataUrl, imageDataUrl })
         return
       }
@@ -79,13 +79,18 @@ async function captureActiveTab(commandTab?: chrome.tabs.Tab): Promise<void> {
 
 async function openWorkspace(imageDataUrl?: string): Promise<void> {
   let suffix = ''
+  let token: string | undefined
   if (imageDataUrl) {
-    const token = crypto.randomUUID()
-    pendingImages.set(token, imageDataUrl)
+    token = crypto.randomUUID()
+    pendingImages.add(token, imageDataUrl)
     suffix = `?capture=${encodeURIComponent(token)}`
-    globalThis.setTimeout(() => pendingImages.delete(token), 60_000)
   }
-  await chrome.tabs.create({ url: chrome.runtime.getURL(`src/workspace/index.html${suffix}`) })
+  try {
+    await chrome.tabs.create({ url: chrome.runtime.getURL(`src/workspace/index.html${suffix}`) })
+  } catch (error) {
+    if (token) pendingImages.delete(token)
+    throw error
+  }
 }
 
 chrome.runtime.onConnect.addListener((port) => {

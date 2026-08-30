@@ -46,9 +46,28 @@ h1 {
   margin: 0;
 }
 
+h2 {
+  margin: 0;
+  font-size: 14px;
+}
+
 .hint {
   color: var(--muted);
   margin: 0 0 12px;
+}
+
+.privacy-note {
+  margin-top: 16px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--block);
+}
+
+.privacy-note p {
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: 12px;
 }
 
 label {
