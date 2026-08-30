@@ -1,8 +1,11 @@
 import assert from 'node:assert/strict'
 import http from 'node:http'
 import {
+  assertHandleCenters,
+  assertScale095,
   closeServer,
   drag,
+  isMinimumTarget,
   launchExtension,
   listen,
   pressShiftArrow,
@@ -125,7 +128,11 @@ try {
   assert.equal(requests.length, 0, 'first-use disclosure must block image requests')
   assert.match(await screenshotPrivacyText(page), /发送到你配置的翻译服务/)
   assert.equal(await screenshotModeFocusedName(page), '同意并继续')
-  await clickShadowButton(page, '同意并继续')
+  const privacyDesign = await screenshotModeDesign(page, '.privacy')
+  assert.equal(privacyDesign.shadow, 'none')
+  assert.equal(privacyDesign.primaryBackground, 'rgb(0, 102, 204)')
+  assert(privacyDesign.buttonSizes.every(isMinimumTarget), 'privacy buttons must be 44px targets')
+  assertScale095(await pressShadowButton(page, '同意并继续'), 'screenshot privacy button')
   await page.waitForFunction(
     () => window.__findScreenshotDialog()?.dataset.state === 'waiting-for-selection',
   )
@@ -161,6 +168,9 @@ try {
   assert.equal(await screenshotState(page), 'adjusting-selection')
   let selection = await screenshotSelection(page)
   assert.deepEqual(selection, { left: 110, top: 150, width: 160, height: 140 })
+  const handleDesign = await screenshotHandleDesign(page)
+  assert(handleDesign.sizes.every(isMinimumTarget), 'screenshot crop handles must be 44px targets')
+  assertHandleCenters(handleDesign.selection, handleDesign.centers)
 
   await drag(
     page,
@@ -234,6 +244,10 @@ try {
   await page.waitForFunction(() => window.__findTranslationCard()?.result === '第一段第二段')
   await page.waitForFunction(() => window.__findTranslationCard()?.copyVisible)
   assert.equal(await screenshotCardFocusedName(page), '关闭截图翻译')
+  const cardDesign = await screenshotCardDesign(page)
+  assert.equal(cardDesign.shadow, 'none')
+  assert.equal(cardDesign.primaryBackground, 'rgb(0, 102, 204)')
+  assert(cardDesign.buttonSizes.every(isMinimumTarget), 'screenshot card buttons must be 44px targets')
 
   await waitForRequestCount(1)
   assert.equal(requests.length, 1, 'confirming twice must still create one request')
@@ -249,7 +263,7 @@ try {
   if (!shortcut.executed) assert.deepEqual(pixels.center, [30, 80, 220, 255])
   else assert.equal(pixels.center[3], 255, 'shortcut capture must contain opaque image pixels')
 
-  await clickCardButton(page, '复制译文')
+  assertScale095(await pressCardButton(page, '复制译文'), 'screenshot card button')
   await page.waitForFunction(() => window.__findTranslationCard()?.copyLabel === '已复制')
   assert.equal(await page.evaluate(() => navigator.clipboard.readText()), '第一段第二段')
 
@@ -602,6 +616,33 @@ async function screenshotHandleCenter(page, handle) {
   }, handle)
 }
 
+async function screenshotHandleDesign(page) {
+  return page.evaluate(() => {
+    const dialog = window.__findScreenshotDialog()
+    const selection = dialog.querySelector('[role="group"]').getBoundingClientRect()
+    const handles = [...dialog.querySelectorAll('[data-handle]')]
+    return {
+      selection: {
+        left: selection.left,
+        top: selection.top,
+        right: selection.right,
+        bottom: selection.bottom,
+      },
+      sizes: handles.map((handle) => {
+        const box = handle.getBoundingClientRect()
+        return { width: box.width, height: box.height }
+      }),
+      centers: Object.fromEntries(handles.map((handle) => {
+        const box = handle.getBoundingClientRect()
+        return [handle.dataset.handle, {
+          x: box.left + box.width / 2,
+          y: box.top + box.height / 2,
+        }]
+      })),
+    }
+  })
+}
+
 async function screenshotStatus(page) {
   return page.evaluate(() =>
     window.__findScreenshotDialog()?.querySelector('[role="status"]')?.textContent ?? '',
@@ -644,6 +685,41 @@ async function clickShadowButton(page, label) {
     return { x: box.left + box.width / 2, y: box.top + box.height / 2 }
   }, label)
   await page.mouse.click(rect.x, rect.y)
+}
+
+async function pressShadowButton(page, label) {
+  const rect = await page.evaluate((text) => {
+    const button = [...window.__findScreenshotDialog().querySelectorAll('button')]
+      .find((candidate) => candidate.textContent === text)
+    const box = button.getBoundingClientRect()
+    return { x: box.left + box.width / 2, y: box.top + box.height / 2 }
+  }, label)
+  await page.mouse.move(rect.x, rect.y)
+  await page.mouse.down()
+  const transform = await page.evaluate((text) => {
+    const button = [...window.__findScreenshotDialog().querySelectorAll('button')]
+      .find((candidate) => candidate.textContent === text)
+    return getComputedStyle(button).transform
+  }, label)
+  await page.mouse.up()
+  return transform
+}
+
+async function screenshotModeDesign(page, selector) {
+  return page.evaluate((scopeSelector) => {
+    const scope = window.__findScreenshotDialog().querySelector(scopeSelector)
+    const primary = scope.querySelector('button.primary')
+    return {
+      shadow: getComputedStyle(scope).boxShadow,
+      primaryBackground: getComputedStyle(primary).backgroundColor,
+      buttonSizes: [...scope.querySelectorAll('button')]
+        .filter((button) => button.getBoundingClientRect().height > 0)
+        .map((button) => {
+          const box = button.getBoundingClientRect()
+          return { width: box.width, height: box.height }
+        }),
+    }
+  }, selector)
 }
 
 async function shadowButtonDisabled(page, label) {
@@ -707,6 +783,43 @@ async function clickCardButton(page, label) {
     return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
   }, label)
   await page.mouse.click(position.x, position.y)
+}
+
+async function pressCardButton(page, label) {
+  const position = await page.evaluate((text) => {
+    const button = [...window.__findScreenshotCard().querySelectorAll('button')].find((candidate) =>
+      candidate.textContent === text || candidate.getAttribute('aria-label') === text,
+    )
+    const rect = button.getBoundingClientRect()
+    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
+  }, label)
+  await page.mouse.move(position.x, position.y)
+  await page.mouse.down()
+  const transform = await page.evaluate((text) => {
+    const button = [...window.__findScreenshotCard().querySelectorAll('button')].find((candidate) =>
+      candidate.textContent === text || candidate.getAttribute('aria-label') === text,
+    )
+    return getComputedStyle(button).transform
+  }, label)
+  await page.mouse.up()
+  return transform
+}
+
+async function screenshotCardDesign(page) {
+  return page.evaluate(() => {
+    const card = window.__findScreenshotCard()
+    const primary = card.querySelector('button.primary:not(.hidden)')
+    return {
+      shadow: getComputedStyle(card).boxShadow,
+      primaryBackground: getComputedStyle(primary).backgroundColor,
+      buttonSizes: [...card.querySelectorAll('button')]
+        .filter((button) => button.getBoundingClientRect().height > 0)
+        .map((button) => {
+          const box = button.getBoundingClientRect()
+          return { width: box.width, height: box.height }
+        }),
+    }
+  })
 }
 
 async function screenshotCardHasOverlappingActions(page) {

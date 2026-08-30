@@ -80,7 +80,7 @@ export class Overlay {
 
   showIcon(anchor: Rect): void {
     this.icon.classList.remove('hidden')
-    this.place(this.icon, anchor, { width: 28, height: 28 })
+    this.place(this.icon, anchor, { width: 44, height: 44 })
   }
 
   hideIcon(): void {

@@ -7,7 +7,11 @@
   --muted: #7a7a7a;
   --border: #e0e0e0;
   --accent: #0066cc;
+  --accent-hover: #0071e3;
+  --primary: #0066cc;
+  --focus: #0071e3;
   --accent-soft: #e8f2fb;
+  --on-accent: #ffffff;
   --danger: #c62828;
   --ok: #137333;
   --image-bg: #272729;
@@ -22,7 +26,11 @@
     --muted: #cccccc;
     --border: #454547;
     --accent: #2997ff;
+    --accent-hover: #0071e3;
+    --primary: #0066cc;
+    --focus: #0071e3;
     --accent-soft: #173a5e;
+    --on-accent: #ffffff;
     --danger: #ff8a80;
     --ok: #81c995;
     --image-bg: #1d1d1f;
@@ -86,6 +94,7 @@ section { min-width: 0; padding: 24px 28px 32px; }
 
 .clipboard-toggle {
   min-width: 0;
+  min-height: 44px;
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -95,14 +104,14 @@ section { min-width: 0; padding: 24px 28px 32px; }
 
 .clipboard-toggle span { overflow-wrap: anywhere; }
 .clipboard-toggle input { flex: 0 0 auto; accent-color: var(--accent); }
-.clipboard-toggle:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 3px; }
+.clipboard-toggle:has(input:focus-visible) { outline: 2px solid var(--focus); outline-offset: 3px; }
 .pane-heading { min-height: 36px; margin-bottom: 12px; }
 .image-heading-actions { justify-content: flex-end; }
-.image-heading-actions button { min-height: 30px; padding: 5px 11px; }
+.image-heading-actions button { min-height: 44px; padding: 5px 11px; }
 .muted { color: var(--muted); }
 
 button {
-  min-height: 38px;
+  min-height: 44px;
   padding: 8px 16px;
   border: 1px solid var(--border);
   border-radius: 9999px;
@@ -114,10 +123,11 @@ button {
 }
 
 button:hover:not(:disabled) { background: var(--surface-alt); }
-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+button:active:not(:disabled) { transform: scale(0.95); }
+button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 button:disabled { opacity: .45; cursor: default; }
-button.primary { border-color: #0066cc; background: #0066cc; color: #ffffff; }
-button.primary:hover:not(:disabled) { border-color: #0071e3; background: #0071e3; }
+button.primary { border-color: var(--primary); background: var(--primary); color: var(--on-accent); }
+button.primary:hover:not(:disabled) { border-color: var(--accent-hover); background: var(--accent-hover); }
 
 .empty-state {
   min-height: min(58vh, 560px);
@@ -162,18 +172,19 @@ body.drag-active .image-stage { outline: 3px solid var(--accent); outline-offset
 .image-frame { position: relative; display: inline-flex; max-width: 100%; max-height: min(58vh, 560px); touch-action: none; }
 .image-stage img { display: block; max-width: 100%; max-height: min(58vh, 560px); object-fit: contain; }
 .crop-selection { position: absolute; border: 2px solid var(--accent); background: rgba(0, 102, 204, .1); cursor: move; outline: none; }
-.crop-selection:focus-visible { outline: 3px solid #ffffff; outline-offset: 2px; }
-.selection-label { position: absolute; top: 0; left: 0; padding: 4px 8px; border-radius: 0 0 5px 0; background: #0066cc; color: #ffffff; font-size: 11px; pointer-events: none; white-space: nowrap; }
-.crop-handle { position: absolute; width: 16px; height: 16px; min-height: 16px; padding: 0; border: 2px solid var(--accent); border-radius: 50%; background: var(--surface); }
-.crop-handle:focus-visible { outline: 2px solid var(--surface); box-shadow: 0 0 0 4px var(--accent); }
-.crop-handle-n { top: -7px; left: calc(50% - 6px); cursor: ns-resize; }
-.crop-handle-ne { top: -7px; right: -7px; cursor: nesw-resize; }
-.crop-handle-e { top: calc(50% - 6px); right: -7px; cursor: ew-resize; }
-.crop-handle-se { right: -7px; bottom: -7px; cursor: nwse-resize; }
-.crop-handle-s { bottom: -7px; left: calc(50% - 6px); cursor: ns-resize; }
-.crop-handle-sw { bottom: -7px; left: -7px; cursor: nesw-resize; }
-.crop-handle-w { top: calc(50% - 6px); left: -7px; cursor: ew-resize; }
-.crop-handle-nw { top: -7px; left: -7px; cursor: nwse-resize; }
+.crop-selection:focus-visible { outline: 3px solid var(--on-accent); outline-offset: 2px; }
+.selection-label { position: absolute; top: 0; left: 0; padding: 4px 8px; border-radius: 0 0 5px 0; background: var(--accent); color: var(--on-accent); font-size: 11px; pointer-events: none; white-space: nowrap; }
+.crop-handle { position: absolute; width: 44px; height: 44px; min-height: 44px; padding: 0; border: 0; border-radius: 50%; background: transparent; }
+.crop-handle::after { content: ""; position: absolute; inset: 14px; border: 2px solid var(--accent); border-radius: 50%; background: var(--surface); }
+.crop-handle:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.crop-handle-n { top: -24px; left: calc(50% - 22px); cursor: ns-resize; }
+.crop-handle-ne { top: -24px; right: -24px; cursor: nesw-resize; }
+.crop-handle-e { top: calc(50% - 22px); right: -24px; cursor: ew-resize; }
+.crop-handle-se { right: -24px; bottom: -24px; cursor: nwse-resize; }
+.crop-handle-s { bottom: -24px; left: calc(50% - 22px); cursor: ns-resize; }
+.crop-handle-sw { bottom: -24px; left: -24px; cursor: nesw-resize; }
+.crop-handle-w { top: calc(50% - 22px); left: -24px; cursor: ew-resize; }
+.crop-handle-nw { top: -24px; left: -24px; cursor: nwse-resize; }
 .inline-status { min-height: 22px; margin: 8px 0 4px; color: var(--danger); overflow-wrap: anywhere; }
 .translate { width: 100%; }
 

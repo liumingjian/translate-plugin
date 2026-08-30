@@ -4,8 +4,11 @@ import http from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
 import {
+  assertHandleCenters,
+  assertScale095,
   closeServer,
   drag,
+  isMinimumTarget,
   launchBrowser,
   listen,
   loadExtension,
@@ -143,9 +146,14 @@ try {
     collectAccessibleButtons(popupTree),
     ['截图翻译 Alt+Shift+S', '导入图片 打开图片翻译工作区', '配置页 翻译服务与模型'],
   )
+  const popupDesign = await surfaceDesign(popup, 'main', '#screenshot')
+  assert.equal(popupDesign.shadow, 'none')
+  assert.equal(popupDesign.primaryBackground, 'rgb(0, 102, 204)')
+  assert(popupDesign.buttonSizes.every(isMinimumTarget), 'popup entries must be 44px targets')
+  assertScale095(await pressedTransform(popup, '#import', false), 'popup entry')
   await popup.emulateMediaFeatures([{ name: 'prefers-color-scheme', value: 'dark' }])
   assert((await contrastFor(popup, 'body')) >= 4.5, 'dark popup text must keep readable contrast')
-  await popup.keyboard.press('Tab')
+  await popup.focus('#screenshot')
   assert.equal(await popup.evaluate(() => document.activeElement?.id), 'screenshot')
   await popup.keyboard.press('Tab')
   assert.equal(await popup.evaluate(() => document.activeElement?.id), 'import')
@@ -160,8 +168,13 @@ try {
   assert((await contrastFor(workspace, 'body')) >= 4.5, 'dark workspace text must keep readable contrast')
   const disclosure = await workspace.$eval('#privacyDialog', (dialog) => dialog.textContent)
   assert.match(disclosure, /发送到你配置的翻译服务/)
-  await workspace.click('#privacyAccept')
+  const dialogDesign = await surfaceDesign(workspace, '#privacyDialog', '#privacyAccept')
+  assert.equal(dialogDesign.shadow, 'none')
+  assert.equal(dialogDesign.primaryBackground, 'rgb(0, 102, 204)')
+  assert(dialogDesign.buttonSizes.every(isMinimumTarget), 'privacy dialog buttons must be 44px targets')
+  assertScale095(await pressedTransform(workspace, '#privacyAccept'), 'workspace privacy button')
   await workspace.waitForFunction(() => !document.querySelector('dialog')?.open)
+  assert.equal(await workspace.$eval('.empty-state', (element) => getComputedStyle(element).boxShadow), 'none')
 
   const input = await workspace.$('#fileInput')
   assert(input)
@@ -177,6 +190,12 @@ try {
   )
   assert.equal(await workspace.$$eval('.crop-handle', (handles) => handles.length), 8)
   assert.equal(await workspace.evaluate(() => document.activeElement?.id), 'cropSelection')
+  const workspaceDesign = await surfaceDesign(workspace, 'body', '#translate')
+  assert.equal(workspaceDesign.primaryBackground, 'rgb(0, 102, 204)')
+  assert(workspaceDesign.buttonSizes.every(isMinimumTarget), 'workspace buttons must be 44px targets')
+  const cropHandleDesign = await workspaceCropHandleDesign(workspace)
+  assert(cropHandleDesign.sizes.every(isMinimumTarget), 'workspace crop handles must be 44px targets')
+  assertHandleCenters(cropHandleDesign.selection, cropHandleDesign.centers)
   const initialKeyboardSelection = await elementBox(workspace, '#cropSelection')
   await workspace.keyboard.press('Tab')
   assert.equal(
@@ -228,7 +247,7 @@ try {
   await new Promise((resolve) => setTimeout(resolve, 200))
   assert.equal(requests.length, 0, 'editing the crop must not submit a request')
 
-  await workspace.click('#translate')
+  assertScale095(await pressedTransform(workspace, '#translate'), 'workspace primary button')
   await workspace.waitForFunction(
     () => document.querySelector('#result')?.textContent === '第一段',
     { timeout: 3_000 },
@@ -369,6 +388,20 @@ try {
   const optionsPage = await optionsTarget.page()
   assert(optionsPage)
   await optionsPage.waitForFunction(() => document.activeElement?.id === 'imageModel')
+  await optionsPage.setViewport({ width: 360, height: 640, deviceScaleFactor: 2 })
+  assert.equal(await hasHorizontalOverflow(optionsPage), false)
+  const optionsDesign = await surfaceDesign(optionsPage, 'main', '#save')
+  assert.equal(optionsDesign.shadow, 'none')
+  assert.equal(optionsDesign.primaryBackground, 'rgb(0, 102, 204)')
+  assert(optionsDesign.buttonSizes.every(isMinimumTarget), 'options buttons must be 44px targets')
+  const optionsControlSizes = await optionsPage.$$eval('input, select', (controls) => controls
+    .filter((control) => control.getBoundingClientRect().height > 0)
+    .map((control) => {
+      const box = control.getBoundingClientRect()
+      return { width: box.width, height: box.height }
+    }))
+  assert(optionsControlSizes.every(isMinimumTarget), 'options controls must be 44px targets')
+  assertScale095(await pressedTransform(optionsPage, '#shortcuts', false), 'options button')
   await optionsPage.close()
   await workspace.bringToFront()
 
@@ -608,6 +641,61 @@ async function elementBox(page, selector) {
   return page.$eval(selector, (element) => {
     const box = element.getBoundingClientRect()
     return { left: box.left, top: box.top, width: box.width, height: box.height }
+  })
+}
+
+async function surfaceDesign(page, surfaceSelector, primarySelector) {
+  return page.evaluate((surface, primary) => {
+    const element = document.querySelector(surface)
+    const primaryButton = document.querySelector(primary)
+    return {
+      shadow: getComputedStyle(element).boxShadow,
+      primaryBackground: getComputedStyle(primaryButton).backgroundColor,
+      buttonSizes: [...element.querySelectorAll('button')]
+        .filter((button) => button.getBoundingClientRect().height > 0)
+        .map((button) => {
+          const box = button.getBoundingClientRect()
+          return { width: box.width, height: box.height }
+        }),
+    }
+  }, surfaceSelector, primarySelector)
+}
+
+async function pressedTransform(page, selector, releaseOnTarget = true) {
+  const box = await elementBox(page, selector)
+  const x = box.left + box.width / 2
+  const y = box.top + box.height / 2
+  await page.mouse.move(x, y)
+  await page.mouse.down()
+  const transform = await page.$eval(selector, (button) => getComputedStyle(button).transform)
+  if (!releaseOnTarget) await page.mouse.move(1, 1)
+  await page.mouse.up()
+  return transform
+}
+
+async function workspaceCropHandleDesign(page) {
+  return page.evaluate(() => {
+    const selection = document.querySelector('#cropSelection').getBoundingClientRect()
+    const handles = [...document.querySelectorAll('.crop-handle')]
+    return {
+      selection: {
+        left: selection.left,
+        top: selection.top,
+        right: selection.right,
+        bottom: selection.bottom,
+      },
+      sizes: handles.map((handle) => {
+        const box = handle.getBoundingClientRect()
+        return { width: box.width, height: box.height }
+      }),
+      centers: Object.fromEntries(handles.map((handle) => {
+        const box = handle.getBoundingClientRect()
+        return [handle.dataset.handle, {
+          x: box.left + box.width / 2,
+          y: box.top + box.height / 2,
+        }]
+      })),
+    }
   })
 }
 

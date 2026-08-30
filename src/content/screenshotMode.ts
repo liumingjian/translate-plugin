@@ -28,7 +28,16 @@ export type ScreenshotModeState =
   | 'exited'
 
 const SCREENSHOT_STYLES = `
-:host { all: initial; }
+:host {
+  all: initial;
+  --tp-primary: #0066cc;
+  --tp-primary-hover: #0071e3;
+  --tp-focus: #0071e3;
+  --tp-on-dark: #ffffff;
+  --tp-dark-surface: #272729;
+  --tp-dark-border: #454547;
+  --tp-muted: #7a7a7a;
+}
 * {
   box-sizing: border-box;
   font-family: "SF Pro Text", system-ui, -apple-system, BlinkMacSystemFont,
@@ -53,31 +62,40 @@ const SCREENSHOT_STYLES = `
 .selection {
   position: absolute;
   display: none;
-  border: 2px solid #2997ff;
+  border: 2px solid var(--tp-focus);
   background: rgba(0, 102, 204, .08);
   box-shadow: 0 0 0 9999px rgba(0, 0, 0, .45);
   cursor: move;
   outline: none;
 }
 .selection.visible { display: block; }
-.selection:focus-visible { outline: 3px solid #ffffff; outline-offset: 2px; }
+.selection:focus-visible { outline: 3px solid var(--tp-on-dark); outline-offset: 2px; }
 .handle {
   position: absolute;
-  width: 12px;
-  height: 12px;
-  border: 2px solid #0066cc;
+  width: 44px;
+  height: 44px;
+  min-height: 44px;
+  border: 0;
   border-radius: 50%;
-  background: #fff;
+  background: transparent;
   padding: 0;
 }
-.handle-n { top: -7px; left: calc(50% - 6px); cursor: ns-resize; }
-.handle-ne { top: -7px; right: -7px; cursor: nesw-resize; }
-.handle-e { top: calc(50% - 6px); right: -7px; cursor: ew-resize; }
-.handle-se { right: -7px; bottom: -7px; cursor: nwse-resize; }
-.handle-s { bottom: -7px; left: calc(50% - 6px); cursor: ns-resize; }
-.handle-sw { bottom: -7px; left: -7px; cursor: nesw-resize; }
-.handle-w { top: calc(50% - 6px); left: -7px; cursor: ew-resize; }
-.handle-nw { top: -7px; left: -7px; cursor: nwse-resize; }
+.handle::after {
+  content: '';
+  position: absolute;
+  inset: 16px;
+  border: 2px solid var(--tp-primary);
+  border-radius: 50%;
+  background: var(--tp-on-dark);
+}
+.handle-n { top: -24px; left: calc(50% - 22px); cursor: ns-resize; }
+.handle-ne { top: -24px; right: -24px; cursor: nesw-resize; }
+.handle-e { top: calc(50% - 22px); right: -24px; cursor: ew-resize; }
+.handle-se { right: -24px; bottom: -24px; cursor: nwse-resize; }
+.handle-s { bottom: -24px; left: calc(50% - 22px); cursor: ns-resize; }
+.handle-sw { bottom: -24px; left: -24px; cursor: nesw-resize; }
+.handle-w { top: calc(50% - 22px); left: -24px; cursor: ew-resize; }
+.handle-nw { top: -24px; left: -24px; cursor: nwse-resize; }
 .toolbar {
   position: absolute;
   left: 50%;
@@ -88,10 +106,10 @@ const SCREENSHOT_STYLES = `
   display: flex;
   align-items: center;
   gap: 8px;
-  border: 1px solid #454547;
+  border: 1px solid var(--tp-dark-border);
   border-radius: 8px;
   background: rgba(0, 0, 0, .92);
-  color: #fff;
+  color: var(--tp-on-dark);
   cursor: default;
 }
 .status {
@@ -101,22 +119,23 @@ const SCREENSHOT_STYLES = `
   white-space: nowrap;
 }
 button {
-  min-height: 32px;
+  min-height: 44px;
   padding: 5px 13px;
-  border: 1px solid #7a7a7a;
+  border: 1px solid var(--tp-muted);
   border-radius: 9999px;
   background: transparent;
-  color: #fff;
+  color: var(--tp-on-dark);
   font-size: 13px;
   cursor: pointer;
 }
-button:hover:not(:disabled) { background: #272729; }
-button.primary { border-color: #0066cc; background: #0066cc; }
-button.primary:hover:not(:disabled) { border-color: #0071e3; background: #0071e3; }
+button:hover:not(:disabled) { background: var(--tp-dark-surface); }
+button:active:not(:disabled) { transform: scale(0.95); }
+button.primary { border-color: var(--tp-primary); background: var(--tp-primary); }
+button.primary:hover:not(:disabled) { border-color: var(--tp-primary-hover); background: var(--tp-primary-hover); }
 button:disabled { opacity: .45; cursor: default; }
-button:focus-visible { outline: 3px solid #fff; outline-offset: 2px; }
-.selection .handle { min-height: 12px; padding: 0; }
-.selection .handle:focus-visible { outline: 2px solid #ffffff; box-shadow: 0 0 0 4px #2997ff; }
+button:focus-visible { outline: 3px solid var(--tp-on-dark); outline-offset: 2px; }
+.selection .handle { min-height: 44px; padding: 0; }
+.selection .handle:focus-visible { outline: 2px solid var(--tp-focus); outline-offset: -2px; }
 .privacy {
   position: absolute;
   left: 50%;
@@ -124,10 +143,10 @@ button:focus-visible { outline: 3px solid #fff; outline-offset: 2px; }
   transform: translate(-50%, -50%);
   width: min(420px, calc(100vw - 24px));
   padding: 20px;
-  border: 1px solid #454547;
+  border: 1px solid var(--tp-dark-border);
   border-radius: 8px;
-  background: #272729;
-  color: #fff;
+  background: var(--tp-dark-surface);
+  color: var(--tp-on-dark);
   cursor: default;
 }
 .privacy.hidden { display: none; }

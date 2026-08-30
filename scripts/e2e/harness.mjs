@@ -2,6 +2,7 @@ import fs from 'node:fs'
 import http from 'node:http'
 import path from 'node:path'
 import process from 'node:process'
+import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
@@ -102,6 +103,31 @@ export async function waitForCount(items, count, timeout = 5_000) {
   }
   if (items.length !== count) {
     throw new Error(`expected ${count} records, received ${items.length}`)
+  }
+}
+
+export function isMinimumTarget(size) {
+  return size.width >= 44 && size.height >= 44
+}
+
+export function assertScale095(transform, label) {
+  assert.match(transform, /^matrix\(0\.95, 0, 0, 0\.95, 0, 0\)$/, `${label} must use scale(0.95)`)
+}
+
+export function assertHandleCenters(selection, handles) {
+  const expected = {
+    n: { x: (selection.left + selection.right) / 2, y: selection.top },
+    ne: { x: selection.right, y: selection.top },
+    e: { x: selection.right, y: (selection.top + selection.bottom) / 2 },
+    se: { x: selection.right, y: selection.bottom },
+    s: { x: (selection.left + selection.right) / 2, y: selection.bottom },
+    sw: { x: selection.left, y: selection.bottom },
+    w: { x: selection.left, y: (selection.top + selection.bottom) / 2 },
+    nw: { x: selection.left, y: selection.top },
+  }
+  for (const [handle, center] of Object.entries(handles)) {
+    assert(Math.abs(center.x - expected[handle].x) < 0.01, `${handle} handle must center on x edge`)
+    assert(Math.abs(center.y - expected[handle].y) < 0.01, `${handle} handle must center on y edge`)
   }
 }
 

@@ -7,6 +7,10 @@
   --muted: #7a7a7a;
   --border: #e0e0e0;
   --accent: #0066cc;
+  --accent-hover: #0071e3;
+  --primary: #0066cc;
+  --focus: #0071e3;
+  --on-accent: #ffffff;
   --danger: #c62828;
   --ok: #137333;
 }
@@ -20,6 +24,10 @@
     --muted: #cccccc;
     --border: #454547;
     --accent: #2997ff;
+    --accent-hover: #0071e3;
+    --primary: #0066cc;
+    --focus: #0071e3;
+    --on-accent: #ffffff;
     --danger: #ff8a80;
     --ok: #81c995;
   }
@@ -82,7 +90,7 @@ select {
 }
 
 input:focus-visible,
-select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+select:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 
 .row {
   min-width: 0;
@@ -95,7 +103,7 @@ select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .row input { flex: 1 1 240px; }
 
 button {
-  min-height: 40px;
+  min-height: 44px;
   padding: 9px 17px;
   border: 1px solid var(--border);
   border-radius: 9999px;
@@ -107,9 +115,10 @@ button {
 }
 
 button:hover { background: var(--surface-alt); }
-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-button.primary { border-color: #0066cc; background: #0066cc; color: #ffffff; }
-button.primary:hover { border-color: #0071e3; background: #0071e3; }
+button:active:not(:disabled) { transform: scale(0.95); }
+button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+button.primary { border-color: var(--primary); background: var(--primary); color: var(--on-accent); }
+button.primary:hover { border-color: var(--accent-hover); background: var(--accent-hover); }
 
 .status { min-width: 0; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
 .status.ok { color: var(--ok); }

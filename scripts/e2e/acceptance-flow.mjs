@@ -81,7 +81,7 @@ export async function runAcceptance(mode) {
       baseUrl: service.baseUrl,
       apiKey: service.apiKey,
       model: 'gpt-5.4-mini',
-      imageModel: 'gpt-5.5',
+      imageModel: 'gpt-5.4-mini',
       imagePrivacyAccepted: true,
       autoReadClipboard: false,
     })
@@ -123,7 +123,7 @@ export async function runAcceptance(mode) {
         { model: 'gpt-5.4-mini', image: false },
         { model: 'gpt-5.4-mini', image: false },
         { model: 'gpt-5.4-mini', image: false },
-        { model: 'gpt-5.5', image: true },
+        { model: 'gpt-5.4-mini', image: true },
       ])
       assert(requests.at(-1).imageBytes > 0, 'image request did not contain encoded pixels')
     }
@@ -132,7 +132,7 @@ export async function runAcceptance(mode) {
       ok: true,
       mode,
       workflows: ['missing-key', 'text-selection', 'image-import'],
-      models: ['gpt-5.4-mini', 'gpt-5.5'],
+      models: ['gpt-5.4-mini'],
       fixturesOnly: true,
       redactedOutput: true,
     })

@@ -22,6 +22,9 @@ export const STYLES = `
   --tp-border: #e0e0e0;
   --tp-accent: #0066cc;
   --tp-primary: #0066cc;
+  --tp-primary-hover: #0071e3;
+  --tp-focus: #0071e3;
+  --tp-on-primary: #ffffff;
   --tp-danger: #c62828;
 }
 
@@ -34,14 +37,17 @@ export const STYLES = `
     --tp-border: #454547;
     --tp-accent: #2997ff;
     --tp-primary: #0066cc;
+    --tp-primary-hover: #0071e3;
+    --tp-focus: #0071e3;
+    --tp-on-primary: #ffffff;
     --tp-danger: #ff8a80;
   }
 }
 
 .icon {
   position: fixed;
-  width: 28px;
-  height: 28px;
+  width: 44px;
+  height: 44px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -52,7 +58,6 @@ export const STYLES = `
   font-size: 14px;
   line-height: 1;
   cursor: pointer;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.18);
   user-select: none;
   padding: 0;
 }
@@ -73,7 +78,6 @@ export const STYLES = `
   border-radius: 8px;
   background: var(--tp-bg);
   color: var(--tp-fg);
-  box-shadow: 0 8px 28px rgba(0, 0, 0, .18);
   font-size: 14px;
   line-height: 1.6;
 }
@@ -87,8 +91,8 @@ export const STYLES = `
 }
 
 .close {
-  width: 28px;
-  height: 28px;
+  width: 44px;
+  height: 44px;
   border: none;
   border-radius: 50%;
   background: transparent;
@@ -142,6 +146,7 @@ export const STYLES = `
 }
 
 .action {
+  min-height: 44px;
   border: 1px solid var(--tp-border);
   background: transparent;
   color: var(--tp-accent);
@@ -156,19 +161,23 @@ export const STYLES = `
 }
 
 .action.primary {
-  color: #fff;
+  color: var(--tp-on-primary);
   background: var(--tp-primary);
   border-color: var(--tp-primary);
 }
 
 .action.primary:hover {
-  background: #0071e3;
-  border-color: #0071e3;
-  color: #fff;
+  background: var(--tp-primary-hover);
+  border-color: var(--tp-primary-hover);
+  color: var(--tp-on-primary);
+}
+
+button:active:not(:disabled) {
+  transform: scale(0.95);
 }
 
 button:focus-visible {
-  outline: 3px solid var(--tp-accent);
+  outline: 3px solid var(--tp-focus);
   outline-offset: 2px;
 }
 
