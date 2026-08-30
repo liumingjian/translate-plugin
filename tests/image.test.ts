@@ -24,6 +24,14 @@ describe('image processing', () => {
     )).toEqual({ x: 998, y: 498, width: 2, height: 2 })
   })
 
+  it('maps fractional CSS coordinates at a high device pixel ratio', () => {
+    expect(mapRectToBitmap(
+      { x: 10.25, y: 20.5, width: 40.5, height: 30.25 },
+      { width: 320, height: 180 },
+      { width: 800, height: 450 },
+    )).toEqual({ x: 25, y: 51, width: 102, height: 76 })
+  })
+
   it('rejects zero-sized rendered images', () => {
     expect(() => mapRectToBitmap(
       { x: 0, y: 0, width: 10, height: 10 },

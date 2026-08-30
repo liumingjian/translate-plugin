@@ -10,6 +10,7 @@ const CHROME =
   process.env.TP_CHROME ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
 
 const requests = []
+let lastCaptureAt = 0
 const pageHtml = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>截图翻译测试</title>
 <style>
 html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#f7f7f7;font:16px sans-serif}
@@ -96,11 +97,11 @@ try {
 
   // Chrome 自己报告默认快捷键已注册；菜单入口随后走完整的真实截图链路。
   // CDP 键盘事件进入渲染进程时已经错过浏览器级 accelerator 分发阶段。
-  const popup = await openPopup(browser, worker, extensionOrigin)
-  await popup.click('#screenshot')
-  await waitForScreenshotMode(page)
+  await beginScreenshot(browser, worker, extensionOrigin, page)
   assert.equal(await countScreenshotModes(page), 1)
   assert.equal(await countFrameScreenshotModes(page), 0)
+  assert.equal(await screenshotState(page), 'waiting-for-selection')
+  assert.equal(await screenshotHandleCount(page), 8)
   const firstFrozenSource = await frozenSource(page)
   const tickBefore = await page.$eval('#ticker', (element) => element.dataset.tick)
   await new Promise((resolve) => setTimeout(resolve, 180))
@@ -108,15 +109,63 @@ try {
   assert.notEqual(tickAfter, tickBefore, 'the live page should keep changing behind the frozen image')
   assert.equal(await frozenSource(page), firstFrozenSource, 'the visible capture must remain frozen')
 
-  const confirmedRect = { left: 110, top: 150, right: 270, bottom: 290 }
-  await page.mouse.move(confirmedRect.left, confirmedRect.top)
-  await page.mouse.down()
-  await page.mouse.move(confirmedRect.right, confirmedRect.bottom, { steps: 8 })
-  await page.mouse.up()
-  const selection = await screenshotSelection(page)
+  await drag(page, 110, 150, 270, 290)
+  assert.equal(await screenshotState(page), 'adjusting-selection')
+  let selection = await screenshotSelection(page)
   assert.deepEqual(selection, { left: 110, top: 150, width: 160, height: 140 })
 
+  await drag(
+    page,
+    selection.left + selection.width / 2,
+    selection.top + selection.height / 2,
+    selection.left + selection.width / 2 + 20,
+    selection.top + selection.height / 2 + 10,
+  )
+  selection = await screenshotSelection(page)
+  assert.deepEqual(selection, { left: 130, top: 160, width: 160, height: 140 })
+
+  for (const [handle, dx, dy] of [
+    ['n', 0, -4], ['ne', 4, -4], ['e', 4, 0], ['se', 4, 4],
+    ['s', 0, 4], ['sw', -4, 4], ['w', -4, 0], ['nw', -4, -4],
+  ]) {
+    const before = await screenshotSelection(page)
+    const center = await screenshotHandleCenter(page, handle)
+    await drag(page, center.x, center.y, center.x + dx, center.y + dy)
+    const after = await screenshotSelection(page)
+    assertHandleMoved(handle, before, after)
+  }
+
+  selection = await screenshotSelection(page)
+  await drag(
+    page,
+    selection.left + selection.width / 2,
+    selection.top + selection.height / 2,
+    1_200,
+    1_000,
+  )
+  selection = await screenshotSelection(page)
+  assert(selection.left >= 0 && selection.top >= 0)
+  assert(selection.left + selection.width <= 900)
+  assert(selection.top + selection.height <= 700)
+
+  await drag(
+    page,
+    selection.left + selection.width / 2,
+    selection.top + selection.height / 2,
+    210,
+    220,
+  )
+  selection = await screenshotSelection(page)
+  const confirmedRect = {
+    left: selection.left,
+    top: selection.top,
+    right: selection.left + selection.width,
+    bottom: selection.top + selection.height,
+  }
+  assert.equal(requests.length, 0, 'adjusting the selection must not create a request')
+
   await clickShadowButton(page, '确认截图')
+  await page.keyboard.press('Enter')
   await page.waitForFunction(() => !window.__findScreenshotDialog())
   assert.equal(await page.$eval('#red', (element) => getComputedStyle(element).backgroundColor), 'rgb(220, 30, 30)')
 
@@ -131,14 +180,73 @@ try {
   assert(cardNearRect(firstStream.rect, confirmedRect), 'the card should be placed near the confirmed area')
   await page.waitForFunction(() => window.__findTranslationCard()?.result === '第一段第二段')
 
-  assert.equal(requests.length, 1)
+  await waitForRequestCount(1)
+  assert.equal(requests.length, 1, 'confirming twice must still create one request')
   assert.equal(requests[0].model, 'deterministic-image-model')
   const content = requests[0].messages.at(-1).content
   assert.equal(content[0].type, 'text')
   assert.equal(content[1].type, 'image_url')
   const pixels = await decodeImage(page, content[1].image_url.url)
-  assert.deepEqual({ width: pixels.width, height: pixels.height }, { width: 160, height: 140 })
+  assert.deepEqual(
+    { width: pixels.width, height: pixels.height },
+    {
+      width: confirmedRect.right - confirmedRect.left,
+      height: confirmedRect.bottom - confirmedRect.top,
+    },
+  )
   assert.deepEqual(pixels.center, [220, 30, 30, 255])
+
+  await beginScreenshot(browser, worker, extensionOrigin, page)
+  await drag(page, 120, 160, 260, 280)
+  await page.keyboard.press('Enter')
+  await page.waitForFunction(() => !window.__findScreenshotDialog())
+  await waitForRequestCount(2)
+
+  await beginScreenshot(browser, worker, extensionOrigin, page)
+  await drag(page, 120, 160, 260, 280)
+  await doubleClick(page, 190, 220)
+  await page.waitForFunction(() => !window.__findScreenshotDialog())
+  await waitForRequestCount(3)
+
+  await beginScreenshot(browser, worker, extensionOrigin, page)
+  await page.keyboard.press('Escape')
+  await page.waitForFunction(() => !window.__findScreenshotDialog())
+  assert.equal(requests.length, 3, 'Escape must not create a request')
+
+  await beginScreenshot(browser, worker, extensionOrigin, page)
+  await clickShadowButton(page, '取消')
+  await page.waitForFunction(() => !window.__findScreenshotDialog())
+  assert.equal(requests.length, 3, 'the cancel button must not create a request')
+
+  await beginScreenshot(browser, worker, extensionOrigin, page)
+  await drag(page, 120, 160, 125, 165)
+  assert.match(await screenshotStatus(page), /太小/)
+  assert.equal(await shadowButtonDisabled(page, '确认截图'), true)
+  await page.keyboard.press('Enter')
+  await doubleClick(page, 122, 162)
+  await new Promise((resolve) => setTimeout(resolve, 200))
+  assert.equal(await countScreenshotModes(page), 1, 'an invalid selection must stay adjustable')
+  assert.equal(requests.length, 3, 'an invalid selection must not create a request')
+  await page.keyboard.press('Escape')
+
+  await page.setViewport({ width: 900, height: 700, deviceScaleFactor: 2 })
+  const pageCdp = await page.target().createCDPSession()
+  await pageCdp.send('Emulation.setPageScaleFactor', { pageScaleFactor: 1.25 })
+  await beginScreenshot(browser, worker, extensionOrigin, page)
+  const frozen = await frozenMetrics(page)
+  await drag(page, 100.25, 150.5, 240.75, 260.25)
+  const scaledSelection = await screenshotSelection(page)
+  await page.keyboard.press('Enter')
+  await waitForRequestCount(4)
+  const scaledContent = requests[3].messages.at(-1).content
+  const scaledPixels = await decodeImage(page, scaledContent[1].image_url.url)
+  const expectedScaled = mappedSize(scaledSelection, frozen)
+  assert.deepEqual(
+    { width: scaledPixels.width, height: scaledPixels.height },
+    expectedScaled,
+    'page zoom and high DPR must map the confirmed display pixels to the frozen bitmap',
+  )
+  await pageCdp.send('Emulation.setPageScaleFactor', { pageScaleFactor: 1 })
 
   // 截图链路结束后，iframe 内原有的每框架划词浮层仍然工作。
   const iframe = page.frames().find((frame) => frame !== page.mainFrame())
@@ -164,7 +272,10 @@ try {
     entries: ['menu', 'registered Alt+Shift+S'],
     frozenTopFrameOnly: true,
     restoredLivePage: true,
-    confirmedPixels: `${pixels.width}x${pixels.height}`,
+    selectionInteractions: ['move', 'n', 'ne', 'e', 'se', 's', 'sw', 'w', 'nw'],
+    confirmationPaths: ['button', 'Enter', 'double-click'],
+    cancellationPaths: ['Escape', 'button'],
+    confirmedPixels: [`${pixels.width}x${pixels.height}`, `${scaledPixels.width}x${scaledPixels.height}@2x`],
     streamedText: '第一段第二段',
     iframeSelectionPreserved: true,
   }))
@@ -183,6 +294,16 @@ async function openPopup(browser, worker, extensionOrigin) {
   const popup = await target.asPage()
   await popup.waitForSelector('#screenshot')
   return popup
+}
+
+async function beginScreenshot(browser, worker, extensionOrigin, page) {
+  const delay = 600 - (Date.now() - lastCaptureAt)
+  if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay))
+  await page.bringToFront()
+  const popup = await openPopup(browser, worker, extensionOrigin)
+  lastCaptureAt = Date.now()
+  await popup.click('#screenshot')
+  await waitForScreenshotMode(page)
 }
 
 async function waitForScreenshotMode(page) {
@@ -208,6 +329,49 @@ async function frozenSource(page) {
   )
 }
 
+async function frozenMetrics(page) {
+  await page.waitForFunction(() => {
+    const image = window.__findScreenshotDialog()
+      ?.querySelector('img[alt="当前页面的冻结画面"]')
+    return image?.complete && image.naturalWidth > 0
+  })
+  return page.evaluate(() => {
+    const image = window.__findScreenshotDialog()
+      .querySelector('img[alt="当前页面的冻结画面"]')
+    const box = image.getBoundingClientRect()
+    return {
+      renderedWidth: box.width,
+      renderedHeight: box.height,
+      bitmapWidth: image.naturalWidth,
+      bitmapHeight: image.naturalHeight,
+    }
+  })
+}
+
+async function screenshotState(page) {
+  return page.evaluate(() => window.__findScreenshotDialog()?.dataset.state)
+}
+
+async function screenshotHandleCount(page) {
+  return page.evaluate(() =>
+    window.__findScreenshotDialog()?.querySelectorAll('[data-handle]').length,
+  )
+}
+
+async function screenshotHandleCenter(page, handle) {
+  return page.evaluate((name) => {
+    const element = window.__findScreenshotDialog().querySelector(`[data-handle="${name}"]`)
+    const box = element.getBoundingClientRect()
+    return { x: box.left + box.width / 2, y: box.top + box.height / 2 }
+  }, handle)
+}
+
+async function screenshotStatus(page) {
+  return page.evaluate(() =>
+    window.__findScreenshotDialog()?.querySelector('[role="status"]')?.textContent ?? '',
+  )
+}
+
 async function screenshotSelection(page) {
   return page.evaluate(() => {
     const selection = window.__findScreenshotDialog()?.querySelector('[aria-label="框选区域"]')
@@ -224,6 +388,56 @@ async function clickShadowButton(page, label) {
     return { x: box.left + box.width / 2, y: box.top + box.height / 2 }
   }, label)
   await page.mouse.click(rect.x, rect.y)
+}
+
+async function shadowButtonDisabled(page, label) {
+  return page.evaluate((text) => {
+    const button = [...window.__findScreenshotDialog().querySelectorAll('button')]
+      .find((candidate) => candidate.textContent === text)
+    return button.disabled
+  }, label)
+}
+
+async function drag(page, fromX, fromY, toX, toY) {
+  await page.mouse.move(fromX, fromY)
+  await page.mouse.down()
+  await page.mouse.move(toX, toY, { steps: 8 })
+  await page.mouse.up()
+}
+
+async function doubleClick(page, x, y) {
+  await page.mouse.move(x, y)
+  await page.mouse.down({ clickCount: 1 })
+  await page.mouse.up({ clickCount: 1 })
+  await page.mouse.down({ clickCount: 2 })
+  await page.mouse.up({ clickCount: 2 })
+}
+
+function assertHandleMoved(handle, before, after) {
+  const beforeRight = before.left + before.width
+  const beforeBottom = before.top + before.height
+  const afterRight = after.left + after.width
+  const afterBottom = after.top + after.height
+  if (handle.includes('n')) assert(after.top < before.top, `${handle} must move the top edge`)
+  if (handle.includes('e')) assert(afterRight > beforeRight, `${handle} must move the right edge`)
+  if (handle.includes('s')) assert(afterBottom > beforeBottom, `${handle} must move the bottom edge`)
+  if (handle.includes('w')) assert(after.left < before.left, `${handle} must move the left edge`)
+}
+
+function mappedSize(rect, image) {
+  const left = Math.floor(rect.left / image.renderedWidth * image.bitmapWidth)
+  const top = Math.floor(rect.top / image.renderedHeight * image.bitmapHeight)
+  const right = Math.ceil((rect.left + rect.width) / image.renderedWidth * image.bitmapWidth)
+  const bottom = Math.ceil((rect.top + rect.height) / image.renderedHeight * image.bitmapHeight)
+  return { width: right - left, height: bottom - top }
+}
+
+async function waitForRequestCount(count) {
+  const deadline = Date.now() + 10_000
+  while (requests.length < count && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 25))
+  }
+  assert.equal(requests.length, count)
 }
 
 async function screenshotCard(page) {

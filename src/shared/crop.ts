@@ -43,10 +43,12 @@ export function resizeRect(
   const minWidth = Math.min(minimum, bounds.width)
   const minHeight = Math.min(minimum, bounds.height)
 
-  if (handle.includes('w')) left = clamp(left + dx, 0, right - minWidth)
-  if (handle.includes('e')) right = clamp(right + dx, left + minWidth, bounds.width)
-  if (handle.includes('n')) top = clamp(top + dy, 0, bottom - minHeight)
-  if (handle.includes('s')) bottom = clamp(bottom + dy, top + minHeight, bounds.height)
+  const horizontalMinimum = rect.width >= minWidth ? minWidth : 0
+  const verticalMinimum = rect.height >= minHeight ? minHeight : 0
+  if (handle.includes('w')) left = clamp(left + dx, 0, right - horizontalMinimum)
+  if (handle.includes('e')) right = clamp(right + dx, left + horizontalMinimum, bounds.width)
+  if (handle.includes('n')) top = clamp(top + dy, 0, bottom - verticalMinimum)
+  if (handle.includes('s')) bottom = clamp(bottom + dy, top + verticalMinimum, bounds.height)
 
   return { x: left, y: top, width: right - left, height: bottom - top }
 }

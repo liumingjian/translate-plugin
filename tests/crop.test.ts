@@ -35,6 +35,14 @@ describe('crop geometry', () => {
     })
   })
 
+  it('keeps a moved rectangle unchanged when the pointer travels beyond every edge', () => {
+    const rect = { x: 20, y: 10, width: 40, height: 30 }
+    const bounds = { width: 100, height: 80 }
+
+    expect(moveRect(rect, -1_000, -1_000, bounds)).toEqual({ x: 0, y: 0, width: 40, height: 30 })
+    expect(moveRect(rect, 1_000, 1_000, bounds)).toEqual({ x: 60, y: 50, width: 40, height: 30 })
+  })
+
   it('resizes from all eight handles while respecting bounds and minimum size', () => {
     const rect = { x: 20, y: 10, width: 40, height: 30 }
     const bounds = { width: 100, height: 80 }
@@ -48,6 +56,22 @@ describe('crop geometry', () => {
     expect(resizeRect(rect, 'sw', -30, 100, bounds)).toEqual({ x: 0, y: 10, width: 60, height: 70 })
     expect(resizeRect(rect, 'w', -30, 0, bounds)).toEqual({ x: 0, y: 10, width: 60, height: 30 })
     expect(resizeRect(rect, 'e', -100, 0, bounds)).toEqual({ x: 20, y: 10, width: 16, height: 30 })
+  })
+
+  it('keeps every resized edge within the viewport', () => {
+    const rect = { x: 20, y: 10, width: 40, height: 30 }
+    const bounds = { width: 100, height: 80 }
+
+    expect(resizeRect(rect, 'nw', -1_000, -1_000, bounds)).toEqual({ x: 0, y: 0, width: 60, height: 40 })
+    expect(resizeRect(rect, 'se', 1_000, 1_000, bounds)).toEqual({ x: 20, y: 10, width: 80, height: 70 })
+  })
+
+  it('does not silently promote an undersized crop when a handle is only clicked', () => {
+    const rect = { x: 20, y: 10, width: 5, height: 5 }
+    const bounds = { width: 100, height: 80 }
+
+    expect(resizeRect(rect, 'nw', 0, 0, bounds)).toEqual(rect)
+    expect(resizeRect(rect, 'nw', -20, -10, bounds)).toEqual({ x: 0, y: 0, width: 25, height: 15 })
   })
 
   it('preserves the selected image region when display bounds change', () => {
