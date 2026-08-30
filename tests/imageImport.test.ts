@@ -20,4 +20,8 @@ describe('image import validation', () => {
       reason: 'image-too-large',
     })
   })
+
+  it('accepts a supported file at exactly 20 MB', () => {
+    expect(checkImageFile({ type: 'image/png', size: MAX_IMAGE_FILE_BYTES })).toEqual({ ok: true })
+  })
 })

@@ -66,7 +66,7 @@ section { min-width: 0; padding: 22px 28px 28px; }
 .image-pane { border-right: 1px solid var(--border); }
 .result-pane { background: var(--surface); }
 
-.pane-heading, .header-actions, .result-actions, .dialog-actions {
+.pane-heading, .header-actions, .image-heading-actions, .result-actions, .dialog-actions {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -74,6 +74,8 @@ section { min-width: 0; padding: 22px 28px 28px; }
 }
 
 .pane-heading { min-height: 32px; margin-bottom: 12px; }
+.image-heading-actions { justify-content: flex-end; }
+.image-heading-actions button { min-height: 28px; padding: 4px 9px; }
 .muted { color: var(--muted); }
 
 button {
@@ -131,10 +133,19 @@ button.primary:hover:not(:disabled) { filter: brightness(.95); background: var(-
   background-position: 0 0, 0 10px, 10px -10px, -10px 0;
 }
 
-.image-frame { position: relative; display: inline-flex; max-width: 100%; max-height: min(58vh, 560px); }
+.image-frame { position: relative; display: inline-flex; max-width: 100%; max-height: min(58vh, 560px); touch-action: none; }
 .image-stage img { display: block; max-width: 100%; max-height: min(58vh, 560px); object-fit: contain; }
-.full-selection { position: absolute; inset: 0; border: 2px solid var(--accent); pointer-events: none; }
-.selection-label { position: absolute; top: 0; left: 0; padding: 3px 7px; background: var(--accent); color: #fff; font-size: 11px; }
+.crop-selection { position: absolute; border: 2px solid var(--accent); background: rgba(23, 105, 224, .08); cursor: move; }
+.selection-label { position: absolute; top: 0; left: 0; padding: 3px 7px; background: var(--accent); color: #fff; font-size: 11px; pointer-events: none; white-space: nowrap; }
+.crop-handle { position: absolute; width: 12px; height: 12px; border: 2px solid var(--accent); border-radius: 2px; background: var(--surface); }
+.crop-handle-n { top: -7px; left: calc(50% - 6px); cursor: ns-resize; }
+.crop-handle-ne { top: -7px; right: -7px; cursor: nesw-resize; }
+.crop-handle-e { top: calc(50% - 6px); right: -7px; cursor: ew-resize; }
+.crop-handle-se { right: -7px; bottom: -7px; cursor: nwse-resize; }
+.crop-handle-s { bottom: -7px; left: calc(50% - 6px); cursor: ns-resize; }
+.crop-handle-sw { bottom: -7px; left: -7px; cursor: nesw-resize; }
+.crop-handle-w { top: calc(50% - 6px); left: -7px; cursor: ew-resize; }
+.crop-handle-nw { top: -7px; left: -7px; cursor: nwse-resize; }
 .inline-status { min-height: 22px; margin: 8px 0 4px; color: var(--danger); }
 .translate { width: 100%; }
 

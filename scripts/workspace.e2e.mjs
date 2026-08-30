@@ -10,13 +10,8 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const DIST = path.join(ROOT, 'dist')
 const CHROME =
   process.env.TP_CHROME ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
-const PNG = Buffer.from(
-  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
-  'base64',
-)
 const tempDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'translate-plugin-workspace-'))
-const fixturePath = path.join(tempDirectory, 'whole-image.png')
-fs.writeFileSync(fixturePath, PNG)
+const fixturePath = path.join(tempDirectory, 'crop-image.png')
 
 const requests = []
 const server = http.createServer((request, response) => {
@@ -64,6 +59,18 @@ try {
   // <all_urls> 完成真实 captureVisibleTab；本地服务另有 localhost 权限。生产构建均不含。
   const restrictedFixture = await browser.newPage()
   await restrictedFixture.goto(baseUrl, { waitUntil: 'load' })
+  const fixtureDataUrl = await restrictedFixture.evaluate(() => {
+    const canvas = document.createElement('canvas')
+    canvas.width = 400
+    canvas.height = 200
+    const context = canvas.getContext('2d')
+    context.fillStyle = 'rgb(220, 30, 30)'
+    context.fillRect(0, 0, 200, 200)
+    context.fillStyle = 'rgb(30, 80, 220)'
+    context.fillRect(200, 0, 200, 200)
+    return canvas.toDataURL('image/png')
+  })
+  fs.writeFileSync(fixturePath, Buffer.from(fixtureDataUrl.split(',')[1], 'base64'))
 
   const cdp = await browser.target().createCDPSession()
   const { id: extensionId } = await cdp.send('Extensions.loadUnpacked', { path: DIST })
@@ -140,9 +147,49 @@ try {
     await workspace.$eval('.full-selection', (selection) => selection.getAttribute('aria-label')),
     '已选择整张图片',
   )
+  assert.equal(await workspace.$$eval('.crop-handle', (handles) => handles.length), 8)
 
-  await workspace.keyboard.press('Enter')
-  await new Promise((resolve) => setTimeout(resolve, 400))
+  await workspace.click('#newSelection')
+  const frame = await workspace.$eval('.image-frame', (element) => {
+    const box = element.getBoundingClientRect()
+    return { left: box.left, top: box.top, width: box.width, height: box.height }
+  })
+  await drag(
+    workspace,
+    frame.left + frame.width * 0.05,
+    frame.top + frame.height * 0.1,
+    frame.left + frame.width * 0.4,
+    frame.top + frame.height * 0.9,
+  )
+  let selection = await elementBox(workspace, '#cropSelection')
+  await drag(
+    workspace,
+    selection.left + selection.width / 2,
+    selection.top + selection.height / 2,
+    selection.left + selection.width / 2 + frame.width * 0.05,
+    selection.top + selection.height / 2,
+  )
+  const eastHandle = await elementBox(workspace, '.crop-handle-e')
+  await drag(
+    workspace,
+    eastHandle.left + eastHandle.width / 2,
+    eastHandle.top + eastHandle.height / 2,
+    eastHandle.left + eastHandle.width / 2 - frame.width * 0.05,
+    eastHandle.top + eastHandle.height / 2,
+  )
+  selection = await elementBox(workspace, '#cropSelection')
+  assert(selection.left >= frame.left - 1)
+  assert(selection.top >= frame.top - 1)
+  assert(selection.left + selection.width <= frame.left + frame.width + 1)
+  assert(selection.top + selection.height <= frame.top + frame.height + 1)
+  await new Promise((resolve) => setTimeout(resolve, 200))
+  assert.equal(requests.length, 0, 'editing the crop must not submit a request')
+
+  await workspace.click('#translate')
+  await workspace.waitForFunction(
+    () => document.querySelector('#result')?.textContent === '第一段',
+    { timeout: 3_000 },
+  )
   const translationState = await workspace.$eval('#result', (element) => ({
     text: element.textContent,
     className: element.className,
@@ -164,6 +211,58 @@ try {
   assert.equal(content[0].type, 'text')
   assert.equal(content[1].type, 'image_url')
   assert.match(content[1].image_url.url, /^data:image\/png;base64,/)
+  const expectedCrop = {
+    x: Math.floor((selection.left - frame.left) / frame.width * 400),
+    y: Math.floor((selection.top - frame.top) / frame.height * 200),
+    right: Math.ceil((selection.left + selection.width - frame.left) / frame.width * 400),
+    bottom: Math.ceil((selection.top + selection.height - frame.top) / frame.height * 200),
+  }
+  const encodedCrop = await workspace.evaluate(async (dataUrl) => {
+    const image = new Image()
+    image.src = dataUrl
+    await image.decode()
+    const canvas = document.createElement('canvas')
+    canvas.width = image.naturalWidth
+    canvas.height = image.naturalHeight
+    const context = canvas.getContext('2d')
+    context.drawImage(image, 0, 0)
+    return {
+      width: canvas.width,
+      height: canvas.height,
+      center: Array.from(context.getImageData(
+        Math.floor(canvas.width / 2),
+        Math.floor(canvas.height / 2),
+        1,
+        1,
+      ).data),
+    }
+  }, content[1].image_url.url)
+  assert.deepEqual(
+    { width: encodedCrop.width, height: encodedCrop.height },
+    {
+      width: expectedCrop.right - expectedCrop.x,
+      height: expectedCrop.bottom - expectedCrop.y,
+    },
+  )
+  assert.deepEqual(encodedCrop.center, [220, 30, 30, 255])
+
+  await workspace.waitForFunction(
+    () => document.querySelector('#translate')?.disabled === false,
+    { timeout: 10_000 },
+  )
+  selection = await elementBox(workspace, '#cropSelection')
+  await workspace.mouse.click(
+    selection.left + selection.width / 2,
+    selection.top + selection.height / 2,
+    { count: 2, delay: 60 },
+  )
+  await waitForRequestCount(2)
+  await workspace.waitForFunction(
+    () => document.querySelector('#translate')?.disabled === false,
+    { timeout: 10_000 },
+  )
+  await workspace.keyboard.press('Enter')
+  await waitForRequestCount(3)
 
   await workspace.click('#clear')
   await workspace.waitForFunction(() => !document.querySelector('#emptyState')?.classList.contains('hidden'))
@@ -198,6 +297,8 @@ try {
       ok: true,
       popupEntries: entries,
       streamedText: '第一段第二段',
+      cropPixels: `${encodedCrop.width}x${encodedCrop.height}`,
+      explicitSubmitMethods: ['button', 'double-click', 'Enter'],
       restrictedPageFallback: true,
     }),
   )
@@ -205,4 +306,26 @@ try {
   await browser.close()
   server.close()
   fs.rmSync(tempDirectory, { recursive: true, force: true })
+}
+
+async function drag(page, fromX, fromY, toX, toY) {
+  await page.mouse.move(fromX, fromY)
+  await page.mouse.down()
+  await page.mouse.move(toX, toY, { steps: 6 })
+  await page.mouse.up()
+}
+
+async function elementBox(page, selector) {
+  return page.$eval(selector, (element) => {
+    const box = element.getBoundingClientRect()
+    return { left: box.left, top: box.top, width: box.width, height: box.height }
+  })
+}
+
+async function waitForRequestCount(count) {
+  const deadline = Date.now() + 5_000
+  while (requests.length < count && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 25))
+  }
+  assert.equal(requests.length, count)
 }

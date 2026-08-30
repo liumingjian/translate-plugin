@@ -2,36 +2,17 @@ import {
   MAX_IMAGE_EDGE,
   MAX_IMAGE_FILE_BYTES,
   MAX_IMAGE_PIXELS,
-  MIN_IMAGE_SELECTION_SIZE,
 } from './constants'
+import { clampRect } from './crop'
+import type { CropRect, Size } from './crop'
 
-export type CropRect = { x: number; y: number; width: number; height: number }
-export type Size = { width: number; height: number }
+export type { CropRect, Size } from './crop'
 
 const SUPPORTED_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp'])
+const PNG_OUTPUT_THRESHOLD_BYTES = 7_500_000
 
-export function normalizeRect(start: { x: number; y: number }, end: { x: number; y: number }): CropRect {
-  return {
-    x: Math.min(start.x, end.x),
-    y: Math.min(start.y, end.y),
-    width: Math.abs(end.x - start.x),
-    height: Math.abs(end.y - start.y),
-  }
-}
-
-export function clampRect(rect: CropRect, bounds: Size): CropRect {
-  const x = clamp(rect.x, 0, bounds.width)
-  const y = clamp(rect.y, 0, bounds.height)
-  return {
-    x,
-    y,
-    width: clamp(rect.width, 0, bounds.width - x),
-    height: clamp(rect.height, 0, bounds.height - y),
-  }
-}
-
-export function validCrop(rect: CropRect | null): rect is CropRect {
-  return !!rect && rect.width >= MIN_IMAGE_SELECTION_SIZE && rect.height >= MIN_IMAGE_SELECTION_SIZE
+export function outputImageType(pngBytes: number): 'image/png' | 'image/webp' {
+  return pngBytes <= PNG_OUTPUT_THRESHOLD_BYTES ? 'image/png' : 'image/webp'
 }
 
 export function targetImageSize(width: number, height: number): Size {
@@ -53,17 +34,52 @@ export function checkImageFile(file: Pick<File, 'size' | 'type'>):
   return { ok: true }
 }
 
+export function checkImageBytes(bytes: Uint8Array):
+  | { ok: true; type: 'image/png' | 'image/jpeg' | 'image/webp' }
+  | { ok: false; reason: 'image-unsupported' } {
+  if (hasBytes(bytes, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) {
+    return { ok: true, type: 'image/png' }
+  }
+  if (hasBytes(bytes, [0xff, 0xd8, 0xff])) return { ok: true, type: 'image/jpeg' }
+  if (
+    hasBytes(bytes, [0x52, 0x49, 0x46, 0x46]) &&
+    hasBytes(bytes, [0x57, 0x45, 0x42, 0x50], 8)
+  ) {
+    return { ok: true, type: 'image/webp' }
+  }
+  return { ok: false, reason: 'image-unsupported' }
+}
+
+export function mapRectToBitmap(rect: CropRect, rendered: Size, bitmap: Size): CropRect {
+  if (rendered.width <= 0 || rendered.height <= 0) throw new Error('图片显示尺寸无效')
+  const constrained = clampRect(rect, rendered)
+  const left = clamp(Math.floor(constrained.x / rendered.width * bitmap.width), 0, bitmap.width)
+  const top = clamp(Math.floor(constrained.y / rendered.height * bitmap.height), 0, bitmap.height)
+  const right = clamp(
+    Math.ceil((constrained.x + constrained.width) / rendered.width * bitmap.width),
+    left,
+    bitmap.width,
+  )
+  const bottom = clamp(
+    Math.ceil((constrained.y + constrained.height) / rendered.height * bitmap.height),
+    top,
+    bitmap.height,
+  )
+  return { x: left, y: top, width: right - left, height: bottom - top }
+}
+
 export async function cropImageDataUrl(
   sourceDataUrl: string,
   rect: CropRect,
   rendered: Size,
 ): Promise<string> {
   const image = await loadImage(sourceDataUrl)
-  const sourceX = Math.round((rect.x / rendered.width) * image.naturalWidth)
-  const sourceY = Math.round((rect.y / rendered.height) * image.naturalHeight)
-  const sourceWidth = Math.max(1, Math.round((rect.width / rendered.width) * image.naturalWidth))
-  const sourceHeight = Math.max(1, Math.round((rect.height / rendered.height) * image.naturalHeight))
-  const target = targetImageSize(sourceWidth, sourceHeight)
+  const source = mapRectToBitmap(rect, rendered, {
+    width: image.naturalWidth,
+    height: image.naturalHeight,
+  })
+  if (source.width < 1 || source.height < 1) throw new Error('图片框选区域无效')
+  const target = targetImageSize(source.width, source.height)
   const canvas = document.createElement('canvas')
   canvas.width = target.width
   canvas.height = target.height
@@ -71,17 +87,20 @@ export async function cropImageDataUrl(
   if (!context) throw new Error('无法创建图片画布')
   context.drawImage(
     image,
-    sourceX,
-    sourceY,
-    sourceWidth,
-    sourceHeight,
+    source.x,
+    source.y,
+    source.width,
+    source.height,
     0,
     0,
     target.width,
     target.height,
   )
-  const png = canvas.toDataURL('image/png')
-  return png.length <= 10_000_000 ? png : canvas.toDataURL('image/webp', 0.92)
+  const png = await canvasToBlob(canvas, 'image/png')
+  const encoded = outputImageType(png.size) === 'image/png'
+    ? png
+    : await canvasToBlob(canvas, 'image/webp', 0.92)
+  return blobToDataUrl(encoded)
 }
 
 function loadImage(source: string): Promise<HTMLImageElement> {
@@ -95,4 +114,29 @@ function loadImage(source: string): Promise<HTMLImageElement> {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value))
+}
+
+function hasBytes(bytes: Uint8Array, expected: readonly number[], offset = 0): boolean {
+  return expected.every((value, index) => bytes[offset + index] === value)
+}
+
+function canvasToBlob(canvas: HTMLCanvasElement, type: string, quality?: number): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(
+      (blob) => blob ? resolve(blob) : reject(new Error('图片编码失败')),
+      type,
+      quality,
+    )
+  })
+}
+
+function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => typeof reader.result === 'string'
+      ? resolve(reader.result)
+      : reject(new Error('图片编码失败'))
+    reader.onerror = () => reject(reader.error)
+    reader.readAsDataURL(blob)
+  })
 }

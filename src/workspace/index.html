@@ -22,7 +22,10 @@
       <section class="image-pane" aria-labelledby="image-heading">
         <div class="pane-heading">
           <h2 id="image-heading">图片</h2>
-          <span id="sourceMeta" class="muted"></span>
+          <div class="image-heading-actions">
+            <span id="sourceMeta" class="muted"></span>
+            <button id="newSelection" type="button" class="secondary" disabled>重新框选</button>
+          </div>
         </div>
         <div id="emptyState" class="empty-state">
           <div class="empty-icon" aria-hidden="true">＋</div>
@@ -32,14 +35,15 @@
         </div>
         <div id="imageStage" class="image-stage hidden">
           <div class="image-frame">
-            <img id="sourceImage" alt="待翻译图片" />
-            <div class="full-selection" aria-label="已选择整张图片"></div>
-            <span class="selection-label">整张图片</span>
+            <img id="sourceImage" alt="待翻译图片" draggable="false" />
+            <div id="cropSelection" class="crop-selection full-selection" aria-label="已选择整张图片">
+              <span id="selectionLabel" class="selection-label">整张图片</span>
+            </div>
           </div>
         </div>
         <input id="fileInput" type="file" accept="image/png,image/jpeg,image/webp" hidden />
         <p id="imageStatus" class="inline-status" role="status"></p>
-        <button id="translate" type="button" class="primary translate" disabled>翻译整张图片</button>
+        <button id="translate" type="button" class="primary translate" disabled>翻译选中区域</button>
       </section>
 
       <section class="result-pane" aria-labelledby="result-heading">

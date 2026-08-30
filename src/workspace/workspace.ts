@@ -1,8 +1,10 @@
-import { checkImageFile } from '../shared/image'
+import { validCrop } from '../shared/crop'
+import { checkImageBytes, checkImageFile, cropImageDataUrl } from '../shared/image'
 import { langName } from '../shared/lang'
 import { getSettings, saveSettings } from '../shared/settings'
 import { TranslationClient } from '../shared/translationClient'
 import type { RuntimeRequest, TranslateEvent, TranslationErrorKind } from '../shared/types'
+import { ImageSurface } from './imageSurface'
 
 const ERROR_MESSAGES: Record<TranslationErrorKind, string> = {
   'no-api-key': '还没有配置 api-key',
@@ -25,6 +27,10 @@ const fileInput = byId<HTMLInputElement>('fileInput')
 const emptyState = byId<HTMLDivElement>('emptyState')
 const imageStage = byId<HTMLDivElement>('imageStage')
 const sourceImage = byId<HTMLImageElement>('sourceImage')
+const imageFrame = bySelector<HTMLDivElement>('.image-frame')
+const cropSelection = byId<HTMLDivElement>('cropSelection')
+const selectionLabel = byId<HTMLSpanElement>('selectionLabel')
+const newSelectionButton = byId<HTMLButtonElement>('newSelection')
 const sourceMeta = byId<HTMLSpanElement>('sourceMeta')
 const imageStatus = byId<HTMLParagraphElement>('imageStatus')
 const language = byId<HTMLSpanElement>('language')
@@ -39,6 +45,18 @@ const client = new TranslationClient()
 let sourceDataUrl: string | null = null
 let translatedText = ''
 let privacyAccepted = false
+let translating = false
+let taskRevision = 0
+
+const imageSurface = new ImageSurface(
+  imageFrame,
+  sourceImage,
+  cropSelection,
+  selectionLabel,
+  newSelectionButton,
+  handleSelectionChange,
+  () => void startTranslation(),
+)
 
 void initialize()
 
@@ -74,7 +92,7 @@ privacyCancel.addEventListener('click', () => privacyDialog.close())
 chooseButton.addEventListener('click', openFilePicker)
 reimportButton.addEventListener('click', openFilePicker)
 clearButton.addEventListener('click', clearWorkspace)
-translateButton.addEventListener('click', startTranslation)
+translateButton.addEventListener('click', () => void startTranslation())
 openOptionsButton.addEventListener('click', () => void sendMessage({ type: 'open-options' }))
 copyButton.addEventListener('click', () => void copyTranslation())
 
@@ -88,7 +106,7 @@ document.addEventListener('keydown', (event) => {
   if (event.key !== 'Enter' || event.repeat || privacyDialog.open || !sourceDataUrl) return
   if (event.target instanceof HTMLButtonElement) return
   event.preventDefault()
-  startTranslation()
+  void startTranslation()
 })
 
 window.addEventListener('pagehide', () => client.cancel(), { once: true })
@@ -106,7 +124,14 @@ async function importFile(file: File): Promise<void> {
     return
   }
   try {
-    const dataUrl = await readDataUrl(file)
+    const buffer = await file.arrayBuffer()
+    const bytesCheck = checkImageBytes(new Uint8Array(buffer))
+    if (!bytesCheck.ok) {
+      imageStatus.textContent = '仅支持 PNG、JPEG 和 WebP 图片'
+      fileInput.value = ''
+      return
+    }
+    const dataUrl = await readDataUrl(new Blob([buffer], { type: bytesCheck.type }))
     await loadSource(dataUrl, file.name)
   } catch {
     imageStatus.textContent = '无法读取这张图片'
@@ -117,6 +142,8 @@ async function importFile(file: File): Promise<void> {
 async function loadSource(dataUrl: string, label: string): Promise<void> {
   await decodeImage(dataUrl)
   client.cancel()
+  taskRevision++
+  translating = false
   sourceDataUrl = dataUrl
   translatedText = ''
   sourceImage.src = dataUrl
@@ -124,18 +151,27 @@ async function loadSource(dataUrl: string, label: string): Promise<void> {
   imageStatus.textContent = ''
   emptyState.classList.add('hidden')
   imageStage.classList.remove('hidden')
-  translateButton.disabled = false
+  await nextFrame()
+  imageSurface.resetToWholeImage()
   reimportButton.disabled = false
   clearButton.disabled = false
+  newSelectionButton.disabled = false
   resetResult('已选择整张图片，按 Enter 开始翻译')
 }
 
-function startTranslation(): void {
-  if (!sourceDataUrl) return
+async function startTranslation(): Promise<void> {
+  const selection = imageSurface.getSelection()
+  if (!sourceDataUrl || translating) return
+  if (!validCrop(selection)) {
+    imageStatus.textContent = '框选区域太小，请重新框选'
+    return
+  }
   if (!privacyAccepted) {
     privacyDialog.showModal()
     return
   }
+  const revision = ++taskRevision
+  translating = true
   translatedText = ''
   language.textContent = '自动 → 自动'
   result.textContent = ''
@@ -145,8 +181,19 @@ function startTranslation(): void {
   translateButton.disabled = true
   translateButton.textContent = '翻译中…'
 
+  let croppedDataUrl: string
+  try {
+    croppedDataUrl = await cropImageDataUrl(sourceDataUrl, selection, imageSurface.getRenderedSize())
+  } catch {
+    if (revision !== taskRevision) return
+    translating = false
+    showError('image-unsupported', '无法处理框选区域')
+    return
+  }
+  if (revision !== taskRevision) return
+
   client.start(
-    { type: 'translate-image', imageDataUrl: sourceDataUrl },
+    { type: 'translate-image', imageDataUrl: croppedDataUrl },
     {
       onEvent: handleEvent,
       onDisconnect: () => showError('network', '连接中断'),
@@ -176,13 +223,15 @@ function handleEvent(event: TranslateEvent): void {
 }
 
 function finishTranslation(): void {
+  translating = false
   result.classList.remove('loading', 'muted', 'error')
   translateButton.disabled = false
-  translateButton.textContent = '重新翻译整张图片'
+  translateButton.textContent = '重新翻译选中区域'
   copyButton.disabled = translatedText === ''
 }
 
 function showError(kind: TranslationErrorKind, detail?: string): void {
+  translating = false
   result.className = 'result error'
   result.textContent = detail ? `${ERROR_MESSAGES[kind]}：${detail}` : ERROR_MESSAGES[kind]
   translateButton.disabled = false
@@ -193,18 +242,22 @@ function showError(kind: TranslationErrorKind, detail?: string): void {
 
 function clearWorkspace(): void {
   client.cancel()
+  taskRevision++
+  translating = false
   sourceDataUrl = null
   translatedText = ''
   sourceImage.removeAttribute('src')
+  imageSurface.clear()
   sourceMeta.textContent = ''
   imageStatus.textContent = ''
   fileInput.value = ''
   emptyState.classList.remove('hidden')
   imageStage.classList.add('hidden')
   translateButton.disabled = true
-  translateButton.textContent = '翻译整张图片'
+  translateButton.textContent = '翻译选中区域'
   reimportButton.disabled = true
   clearButton.disabled = true
+  newSelectionButton.disabled = true
   resetResult('导入图片后，按 Enter 开始翻译')
 }
 
@@ -230,13 +283,29 @@ async function copyTranslation(): Promise<void> {
   }, 1200)
 }
 
-function readDataUrl(file: File): Promise<string> {
+function handleSelectionChange(selection: ReturnType<ImageSurface['getSelection']>): void {
+  if (!sourceDataUrl) return
+  const valid = validCrop(selection)
+  imageStatus.textContent = selection === null
+    ? '在图片上拖动以创建框选区域'
+    : valid
+      ? ''
+      : '框选区域太小，请继续调整'
+  translateButton.disabled = translating || !valid
+  translateButton.textContent = '翻译选中区域'
+}
+
+function readDataUrl(file: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
     reader.onload = () => (typeof reader.result === 'string' ? resolve(reader.result) : reject())
     reader.onerror = () => reject(reader.error)
     reader.readAsDataURL(file)
   })
+}
+
+function nextFrame(): Promise<void> {
+  return new Promise((resolve) => requestAnimationFrame(() => resolve()))
 }
 
 function decodeImage(dataUrl: string): Promise<void> {
@@ -255,5 +324,11 @@ function sendMessage<T = unknown>(message: RuntimeRequest): Promise<T> {
 function byId<T extends HTMLElement>(id: string): T {
   const element = document.getElementById(id)
   if (!element) throw new Error(`missing element: ${id}`)
+  return element as T
+}
+
+function bySelector<T extends HTMLElement>(selector: string): T {
+  const element = document.querySelector(selector)
+  if (!element) throw new Error(`missing element: ${selector}`)
   return element as T
 }
