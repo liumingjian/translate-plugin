@@ -10,6 +10,7 @@
     "test:watch": "vitest",
     "e2e": "node scripts/e2e.mjs",
     "e2e:icon": "node scripts/icon.e2e.mjs",
+    "e2e:screenshot": "vite build --mode e2e && node scripts/screenshot.e2e.mjs",
     "e2e:workspace": "vite build --mode e2e && node scripts/workspace.e2e.mjs"
   },
   "devDependencies": {

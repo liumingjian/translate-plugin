@@ -41,6 +41,7 @@ export class Overlay {
   private readonly root: ShadowRoot
   private readonly icon = document.createElement('button')
   private readonly card = document.createElement('div')
+  private readonly title = document.createElement('span')
   private readonly sourceBlock = document.createElement('div')
   private readonly badge = document.createElement('div')
   private readonly resultBlock = document.createElement('div')
@@ -54,6 +55,7 @@ export class Overlay {
   private refitQueued = false
   private flashTimer: number | null = null
   private flashLabel: string | null = null
+  private imageCard = false
 
   constructor(private readonly handlers: OverlayHandlers) {
     this.host.style.setProperty('all', 'initial')
@@ -94,7 +96,24 @@ export class Overlay {
   }
 
   openCard(sourceText: string, anchor: Rect): void {
+    this.imageCard = false
+    this.title.textContent = '划词翻译'
     this.sourceBlock.textContent = sourceText
+    this.setLang(undefined, undefined)
+    this.setLoading()
+    this.card.classList.remove('hidden')
+    this.reposition(anchor)
+  }
+
+  openImageCard(imageDataUrl: string, anchor: Rect): void {
+    this.imageCard = true
+    this.title.textContent = '截图翻译'
+    this.sourceBlock.textContent = ''
+    const preview = document.createElement('img')
+    preview.className = 'screenshot-preview'
+    preview.src = imageDataUrl
+    preview.alt = '已确认的截图'
+    this.sourceBlock.append(preview)
     this.setLang(undefined, undefined)
     this.setLoading()
     this.card.classList.remove('hidden')
@@ -136,7 +155,7 @@ export class Overlay {
   finish(): void {
     if (this.resultText.className === 'dots') this.resultText.className = ''
     this.copyButton.classList.remove('hidden')
-    this.retryButton.classList.remove('hidden')
+    this.retryButton.classList.toggle('hidden', this.imageCard)
     this.refit()
   }
 
@@ -184,8 +203,7 @@ export class Overlay {
 
     const header = document.createElement('div')
     header.className = 'header'
-    const title = document.createElement('span')
-    title.textContent = '划词翻译'
+    this.title.textContent = '划词翻译'
     const close = document.createElement('button')
     close.className = 'close'
     close.type = 'button'
@@ -195,7 +213,7 @@ export class Overlay {
       this.hideCard()
       this.handlers.onCardClose()
     })
-    header.append(title, close)
+    header.append(this.title, close)
 
     this.sourceBlock.className = 'block source'
     this.badge.className = 'badge'

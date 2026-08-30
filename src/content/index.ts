@@ -1,8 +1,12 @@
 import type { Rect } from '../shared/position'
+import { cropImageDataUrl } from '../shared/image'
 import { checkSelection } from '../shared/selection'
+import { TranslationClient } from '../shared/translationClient'
 import { PORT_NAME } from '../shared/types'
-import type { TranslateEvent } from '../shared/types'
+import type { ContentRequest, TranslateEvent } from '../shared/types'
 import { Overlay } from './overlay'
+import { ScreenshotMode } from './screenshotMode'
+import type { ConfirmedScreenshot } from './screenshotMode'
 import { readSelection } from './selectionSource'
 
 /** 当前选区的锚点求值器 —— 每次滚动都重新问一次，图标才跟得住。 */
@@ -12,6 +16,8 @@ let tooLong = false
 let activePort: chrome.runtime.Port | null = null
 /** 是否有一次翻译还在流式进行中 —— 用来区分「用户主动关」和「端口意外断」。 */
 let streaming = false
+const screenshotClient = new TranslationClient()
+let screenshotRevision = 0
 
 const overlay = new Overlay({
   onIconClick: () => {
@@ -35,8 +41,20 @@ const overlay = new Overlay({
   onCardClose: () => {
     // 关掉卡片就该停掉还在跑的请求，否则译文白烧 token 也白流。
     closePort()
+    screenshotClient.cancel()
   },
 })
+
+const screenshotMode = window === window.top
+  ? new ScreenshotMode({ onConfirm: (screenshot) => void confirmScreenshot(screenshot) })
+  : null
+
+if (window === window.top) {
+  chrome.runtime.onMessage.addListener((message: ContentRequest) => {
+    if (message?.type !== 'begin-screenshot') return
+    beginScreenshot(message.imageDataUrl)
+  })
+}
 
 document.addEventListener('mouseup', (event) => {
   if (overlay.contains(event.target)) return
@@ -89,6 +107,64 @@ function dismiss(): void {
   overlay.hideIcon()
   overlay.hideCard()
   closePort()
+  screenshotClient.cancel()
+}
+
+function beginScreenshot(imageDataUrl: string): void {
+  if (!screenshotMode) return
+  dismiss()
+  screenshotRevision++
+  screenshotMode.begin(imageDataUrl)
+}
+
+async function confirmScreenshot(screenshot: ConfirmedScreenshot): Promise<void> {
+  const revision = ++screenshotRevision
+  const anchor: Rect = {
+    left: screenshot.rect.x,
+    top: screenshot.rect.y,
+    right: screenshot.rect.x + screenshot.rect.width,
+    bottom: screenshot.rect.y + screenshot.rect.height,
+  }
+  let cropped: string
+  try {
+    cropped = await cropImageDataUrl(screenshot.imageDataUrl, screenshot.rect, screenshot.viewport)
+  } catch {
+    if (revision !== screenshotRevision) return
+    overlay.openImageCard(screenshot.imageDataUrl, anchor)
+    overlay.showError('image-unsupported', '无法处理框选区域')
+    return
+  }
+  if (revision !== screenshotRevision) return
+  overlay.openImageCard(cropped, anchor)
+  screenshotClient.start(
+    { type: 'translate-image', imageDataUrl: cropped },
+    {
+      onEvent: (event) => {
+        if (revision !== screenshotRevision) return
+        switch (event.type) {
+          case 'lang':
+            overlay.setLang(event.source, event.target)
+            break
+          case 'delta':
+            overlay.appendDelta(event.text)
+            break
+          case 'done':
+            overlay.finish()
+            screenshotClient.finish()
+            break
+          case 'error':
+            overlay.showError(event.kind, event.detail)
+            screenshotClient.finish()
+            break
+        }
+      },
+      onDisconnect: () => {
+        if (revision === screenshotRevision) {
+          overlay.showError('network', '连接中断，请重试')
+        }
+      },
+    },
+  )
 }
 
 const follow = throttleToFrame(() => {
