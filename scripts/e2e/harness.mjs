@@ -124,12 +124,25 @@ export async function triggerBrowserShortcut(processId) {
   return { executed: true, reason: null }
 }
 
-export async function respondToBrowserPermissionPrompt(action, windowTitle = '图片翻译工作区') {
+export async function respondToBrowserPermissionPrompt(
+  action,
+  windowTitle = '图片翻译工作区',
+  processId,
+) {
   if (process.env.TP_E2E_OS_PERMISSIONS !== '1') {
     return { executed: false, reason: 'set TP_E2E_OS_PERMISSIONS=1 for the macOS platform harness' }
   }
   if (process.platform !== 'darwin' || process.env.TP_HEADLESS !== '0') {
     throw new Error('TP_E2E_OS_PERMISSIONS requires macOS and TP_HEADLESS=0')
+  }
+  if (action === 'ax-accept') {
+    if (!process.env.TP_E2E_AX_PERMISSION_HELPER || !processId) {
+      throw new Error('ax-accept requires TP_E2E_AX_PERMISSION_HELPER and a Chrome process id')
+    }
+    const args = [String(processId)]
+    if (process.env.TP_E2E_AX_ACCEPT_LABEL) args.push(process.env.TP_E2E_AX_ACCEPT_LABEL)
+    const { stdout } = await execFileAsync(process.env.TP_E2E_AX_PERMISSION_HELPER, args)
+    return { executed: true, reason: stdout.trim() }
   }
   const application = process.env.TP_CHROME_APP ?? 'Google Chrome'
   const focusWindow = [

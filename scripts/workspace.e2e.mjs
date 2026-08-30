@@ -478,11 +478,15 @@ try {
     const permissionAction = process.env.TP_E2E_OS_PERMISSION_ACTION ?? 'deny'
     await workspace.click('#autoReadClipboard')
     await new Promise((resolve) => setTimeout(resolve, 500))
-    await respondToBrowserPermissionPrompt(permissionAction)
+    const osResponse = await respondToBrowserPermissionPrompt(
+      permissionAction,
+      '图片翻译工作区',
+      browser.process()?.pid,
+    )
     await waitForClipboardPermissionDecision(worker, workspace)
-    permissionBoundary = permissionAction === 'accept'
-      ? { grantAttempt: 'Chrome optional permission prompt answered by OS Tab/Enter' }
-      : { deny: 'Chrome optional permission prompt dismissed by OS Escape' }
+    permissionBoundary = permissionAction === 'deny'
+      ? { deny: 'Chrome optional permission prompt dismissed by OS Escape' }
+      : { grantAttempt: osResponse.reason }
   } else {
     permissionBoundary = {
       request: 'not exercised: requires headed Chrome browser UI; CDP cannot inspect the prompt',
@@ -544,30 +548,33 @@ try {
     () => document.querySelector('#sourceMeta')?.textContent === 'crop-image.png',
   )
 
-  await restrictedFixture.bringToFront()
-  const fallbackPopup = await openPopup()
-  const beforeFallback = new Set(browser.targets())
-  await fallbackPopup.click('#screenshot')
-  await new Promise((resolve) => setTimeout(resolve, 2_000))
-  const fallbackStatus = fallbackPopup.isClosed()
-    ? 'popup closed'
-    : await fallbackPopup.$eval('#status', (element) => element.textContent)
-  if (!browser.targets().some((target) => !beforeFallback.has(target))) {
-    throw new Error(`restricted-page fallback did not open a tab: ${fallbackStatus}`)
+  const restrictedPageFallback = !permissionGranted
+  if (restrictedPageFallback) {
+    await restrictedFixture.bringToFront()
+    const fallbackPopup = await openPopup()
+    const beforeFallback = new Set(browser.targets())
+    await fallbackPopup.click('#screenshot')
+    await new Promise((resolve) => setTimeout(resolve, 2_000))
+    const fallbackStatus = fallbackPopup.isClosed()
+      ? 'popup closed'
+      : await fallbackPopup.$eval('#status', (element) => element.textContent)
+    if (!browser.targets().some((target) => !beforeFallback.has(target))) {
+      throw new Error(`restricted-page fallback did not open a tab: ${fallbackStatus}`)
+    }
+    const fallbackWorkspace = await waitForWorkspace(beforeFallback)
+    await fallbackWorkspace.waitForFunction(() => {
+      const image = document.querySelector('#sourceImage')
+      return image instanceof HTMLImageElement && image.naturalWidth > 0
+    })
+    assert.equal(
+      await fallbackWorkspace.$eval('#sourceMeta', (element) => element.textContent),
+      '当前页面截图',
+    )
+    assert.equal(
+      await fallbackWorkspace.$eval('#privacyDialog', (dialog) => dialog.open),
+      false,
+    )
   }
-  const fallbackWorkspace = await waitForWorkspace(beforeFallback)
-  await fallbackWorkspace.waitForFunction(() => {
-    const image = document.querySelector('#sourceImage')
-    return image instanceof HTMLImageElement && image.naturalWidth > 0
-  })
-  assert.equal(
-    await fallbackWorkspace.$eval('#sourceMeta', (element) => element.textContent),
-    '当前页面截图',
-  )
-  assert.equal(
-    await fallbackWorkspace.$eval('#privacyDialog', (dialog) => dialog.open),
-    false,
-  )
 
   console.log(
     JSON.stringify({
@@ -587,7 +594,7 @@ try {
             ...permissionBoundary,
             grant: 'requires TP_E2E_MANUAL_PERMISSIONS or a pre-authorized profile',
           },
-      restrictedPageFallback: true,
+      restrictedPageFallback,
       accessibility: ['popup-names', 'dark', 'high-dpr', 'narrow-viewport'],
     }),
   )

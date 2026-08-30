@@ -53,9 +53,20 @@ TP_HEADLESS=0 TP_E2E_OS_PERMISSIONS=1 TP_E2E_OS_PERMISSION_ACTION=deny \
 TP_E2E_CLIPBOARD_PROFILE=/tmp/translate-plugin-permission-deny pnpm e2e:workspace
 ```
 
-Chrome 不向 CDP 暴露可选扩展权限的确认气泡，自动化的 Tab/Enter 无法稳定接受。授权、无图片和撤销
-使用真实 Chrome API 的交互验收需在 headed 模式手动点击允许；脚本随后会继续验证自动读取、无图片和
+Chrome 不向 CDP 暴露可选扩展权限的确认气泡。macOS 平台 harness 可通过 AXUIElement 在测试 Chrome
+进程的 `AXSheet` 中按下允许按钮；Chrome 没有为该弹窗暴露 default/cancel button 属性，因此接受标签
+通过环境变量显式提供，以适配浏览器 UI 语言。脚本随后验证自动读取、无图片和
 `chrome.permissions.remove` 撤销，且不会替换产品 API：
+
+```bash
+swiftc scripts/e2e/macos-press-permission.swift -o /tmp/translate-plugin-permission
+TP_HEADLESS=0 TP_E2E_OS_PERMISSIONS=1 TP_E2E_OS_PERMISSION_ACTION=ax-accept \
+TP_E2E_AX_PERMISSION_HELPER=/tmp/translate-plugin-permission \
+TP_E2E_AX_ACCEPT_LABEL=Allow \
+TP_E2E_CLIPBOARD_PROFILE=/tmp/translate-plugin-permission-grant pnpm e2e:workspace
+```
+
+无法使用 macOS Accessibility API 时，仍可在 headed 模式手动点击允许：
 
 ```bash
 TP_HEADLESS=0 TP_E2E_MANUAL_PERMISSIONS=1 \
