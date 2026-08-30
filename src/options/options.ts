@@ -38,7 +38,9 @@ saveButton.addEventListener('click', () => {
       report('未授权访问该服务地址，配置没有保存', 'error')
       return
     }
+    const current = await getSettings()
     await saveSettings({
+      ...current,
       baseUrl,
       apiKey: apiKeyInput.value.trim(),
       model: modelInput.value.trim() || DEFAULT_SETTINGS.model,

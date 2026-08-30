@@ -29,6 +29,10 @@ const ERRORS: Record<TranslationErrorKind, ErrorSpec> = {
     retry: false,
     options: false,
   },
+  'image-too-small': { message: '框选区域太小', retry: false, options: false },
+  'image-too-large': { message: '图片过大', retry: false, options: false },
+  'image-unsupported': { message: '截图模型不支持图片', retry: false, options: true },
+  'no-text': { message: '未识别到可翻译文字', retry: true, options: false },
 }
 
 /** 划词图标与翻译卡片。整体活在一个 open Shadow DOM 里。 */

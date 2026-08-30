@@ -15,7 +15,12 @@ export const DEFAULT_SETTINGS: Settings = {
 /** api-key 只存本机，不进 storage.sync —— 同步到 Google 账号是不必要的暴露面。 */
 export async function getSettings(): Promise<Settings> {
   const stored = await chrome.storage.local.get(KEY)
-  return { ...DEFAULT_SETTINGS, ...(stored[KEY] as Partial<Settings> | undefined) }
+  return migrateSettings(stored[KEY])
+}
+
+export function migrateSettings(stored: unknown): Settings {
+  if (!stored || typeof stored !== 'object') return { ...DEFAULT_SETTINGS }
+  return { ...DEFAULT_SETTINGS, ...(stored as Partial<Settings>) }
 }
 
 export async function saveSettings(settings: Settings): Promise<void> {

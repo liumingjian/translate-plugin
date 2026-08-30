@@ -1,5 +1,44 @@
 import { describe, expect, it } from 'vitest'
-import { chatCompletionsUrl, modelsUrl, normalizeBaseUrl } from '../src/shared/settings'
+import {
+  DEFAULT_SETTINGS,
+  chatCompletionsUrl,
+  migrateSettings,
+  modelsUrl,
+  normalizeBaseUrl,
+} from '../src/shared/settings'
+
+describe('settings migration', () => {
+  it('preserves legacy service credentials and text model while adding image defaults', () => {
+    expect(
+      migrateSettings({
+        baseUrl: 'https://legacy.example.com',
+        apiKey: 'legacy-key',
+        model: 'legacy-text-model',
+      }),
+    ).toEqual({
+      baseUrl: 'https://legacy.example.com',
+      apiKey: 'legacy-key',
+      model: 'legacy-text-model',
+      imageModel: 'gpt-5.5',
+      imagePrivacyAccepted: false,
+      autoReadClipboard: false,
+    })
+  })
+
+  it('preserves image settings already saved by a newer version', () => {
+    const stored = {
+      ...DEFAULT_SETTINGS,
+      imageModel: 'custom-vision-model',
+      imagePrivacyAccepted: true,
+      autoReadClipboard: true,
+    }
+    expect(migrateSettings(stored)).toEqual(stored)
+  })
+
+  it('uses all defaults when there are no stored settings', () => {
+    expect(migrateSettings(undefined)).toEqual(DEFAULT_SETTINGS)
+  })
+})
 
 describe('normalizeBaseUrl', () => {
   it('去掉尾部斜杠', () => {

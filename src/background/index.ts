@@ -5,6 +5,11 @@ import { LangHeaderParser } from '../shared/langHeader'
 import { Lru } from '../shared/lru'
 import { checkSelection } from '../shared/selection'
 import { chatCompletionsUrl, getSettings, normalizeBaseUrl } from '../shared/settings'
+import {
+  NoTextOutputBuffer,
+  classifyHttpError,
+  classifyOutput,
+} from '../shared/translationErrors'
 import { PORT_NAME } from '../shared/types'
 import type {
   ContentRequest,
@@ -17,9 +22,6 @@ import type {
 import { SseParser, deltaOf, finishReasonOf } from './sse'
 
 type CachedTranslation = { source?: string; target?: string; text: string }
-
-/** 上游瞬时故障：重试一下多半就好了。 */
-const TRANSIENT_STATUS = new Set([408, 425, 429, 500, 502, 503, 504])
 
 /** 首个 delta 吐出之前最多试这么多次（含第一次）。 */
 const MAX_ATTEMPTS = 3
@@ -243,18 +245,15 @@ async function attemptTranslate(
   }
 
   if (!response.ok || !response.body) {
-    const transient = TRANSIENT_STATUS.has(response.status)
     const detail = await errorDetail(response)
+    const classified =
+      response.ok && imageRequest
+        ? { kind: 'empty' as const, retryable: false }
+        : classifyHttpError(response.status, detail, imageRequest)
     return {
       kind: 'failed',
-      retryable: transient,
-      errorKind: authFailure(response.status)
-        ? 'auth'
-        : transient
-          ? 'unavailable'
-          : imageRequest && /image|vision|multimodal|图片|视觉/i.test(detail)
-            ? 'image-unsupported'
-            : 'network',
+      retryable: classified.retryable,
+      errorKind: classified.kind,
       detail,
     }
   }
@@ -266,6 +265,8 @@ async function attemptTranslate(
   const collected: CachedTranslation = { text: '' }
   let finished = false
   let emitted = false
+  const noTextBuffer = imageRequest ? new NoTextOutputBuffer() : null
+  let sawNoText = false
 
   const push = (chunk: string) => {
     if (chunk === '') return
@@ -274,21 +275,29 @@ async function attemptTranslate(
     emit({ type: 'delta', text: chunk })
   }
 
+  const parseDelta = (chunk: string) => {
+    chunk = noTextBuffer?.feed(chunk) ?? chunk
+    const parsed = header.feed(chunk)
+    if (parsed.header) {
+      collected.source = parsed.header.source
+      collected.target = parsed.header.target
+      emit({ type: 'lang', ...parsed.header })
+    }
+    push(parsed.text)
+  }
+
   try {
     for (;;) {
       const { value, done } = await reader.read()
       if (done) break
       for (const payload of sse.feed(decoder.decode(value, { stream: true }))) {
         if (finishReasonOf(payload) !== null) finished = true
-        const parsed = header.feed(deltaOf(payload))
-        if (parsed.header) {
-          collected.source = parsed.header.source
-          collected.target = parsed.header.target
-          emit({ type: 'lang', ...parsed.header })
-        }
-        push(parsed.text)
+        parseDelta(deltaOf(payload))
       }
     }
+    const tail = noTextBuffer?.finish()
+    if (tail?.noText) sawNoText = true
+    else parseDelta(tail?.text ?? '')
     push(header.flush())
   } catch (error) {
     if (signal.aborted) return { kind: 'aborted' }
@@ -301,12 +310,9 @@ async function attemptTranslate(
     }
   }
 
-  if (collected.text.trim() === '') {
-    return { kind: 'failed', retryable: !emitted, errorKind: 'empty' }
-  }
-
-  if (imageRequest && collected.text.trim() === 'NO_TEXT') {
-    return { kind: 'failed', retryable: false, errorKind: 'no-text' }
+  const outputError = classifyOutput(sawNoText ? 'NO_TEXT' : collected.text, imageRequest)
+  if (outputError) {
+    return { kind: 'failed', retryable: outputError === 'empty' && !emitted, errorKind: outputError }
   }
 
   return { kind: 'ok', collected, complete: sse.sawDone || finished }
@@ -324,10 +330,6 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
       { once: true },
     )
   })
-}
-
-function authFailure(status: number): boolean {
-  return status === 401 || status === 403
 }
 
 async function errorDetail(response: Response): Promise<string> {
