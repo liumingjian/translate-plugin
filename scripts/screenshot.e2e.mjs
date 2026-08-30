@@ -3,6 +3,7 @@ import http from 'node:http'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import puppeteer from 'puppeteer-core'
+import { closeServer } from './e2e/harness.mjs'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const DIST = path.join(ROOT, 'dist')
@@ -377,7 +378,10 @@ try {
     await clickCardButton(page, '重试')
     await waitForRequestCount(before + 4)
     await page.waitForFunction(() => window.__findTranslationCard()?.result === '第一段第二段')
-    assert.equal(imageUrlOf(requests[before + 3]), failedImage, `${mode} retry must reuse the crop`)
+    assert(
+      imageUrlOf(requests[before + 3]) === failedImage,
+      `${mode} retry must reuse the crop`,
+    )
   }
 
   responseMode = 'partial'
@@ -485,7 +489,7 @@ try {
   }))
 } finally {
   await browser.close()
-  server.close()
+  await closeServer(server)
 }
 
 async function openPopup(browser, worker, extensionOrigin) {

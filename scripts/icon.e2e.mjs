@@ -3,10 +3,12 @@
  * 用法：node scripts/icon.e2e.mjs（不需要 api-key，先 pnpm build）
  * 每个场景输出一行 JSON，visible=false 即回归。
  */
+import assert from 'node:assert/strict'
 import http from 'node:http'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import puppeteer from 'puppeteer-core'
+import { closeServer } from './e2e/harness.mjs'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const DIST = path.join(ROOT, 'dist')
@@ -73,13 +75,11 @@ const PROBE = () => {
   const icon = host.shadowRoot.querySelector('.icon')
   const card = host.shadowRoot.querySelector('.card')
   const r = icon.getBoundingClientRect()
-  const sel = getSelection()
   return {
     visible: !icon.classList.contains('hidden'),
     rect: { x: Math.round(r.x), y: Math.round(r.y) },
     inView: r.x >= 0 && r.y >= 0 && r.x < innerWidth && r.y < innerHeight,
     cardVisible: !card.classList.contains('hidden'),
-    sel: String(sel).slice(0, 30),
     active: (() => {
       let el = document.activeElement
       while (el?.shadowRoot?.activeElement) el = el.shadowRoot.activeElement
@@ -140,11 +140,18 @@ try {
     await sleep(700)
   }
 
-  const scenario = async (name, frameId, fn) => {
+  const scenario = async (
+    name,
+    frameId,
+    fn,
+    verify = (state) => state.visible && state.inView,
+  ) => {
     await clear()
     const { frame, offset } = await frameOf(frameId)
     await fn({ frame, offset })
-    log({ scenario: name, ...(await probe(frame)) })
+    const state = await probe(frame)
+    assert(verify(state), `${name} did not reach its expected visible state`)
+    log({ scenario: name, ...state })
   }
 
   const dragScenario = (name, frameId, selector, dy) =>
@@ -161,25 +168,35 @@ try {
   await dragScenario('iframe-srcdoc', 'srcdoc', '#fp')
 
   // 点开卡片：iframe 里的卡片被框架视口夹住，但至少得开出来。
-  await scenario('iframe-card-opens', 'cross', async ({ frame, offset }) => {
-    await drag(await boxIn(frame, '#fp'), offset)
-    const before = await probe(frame)
-    if (!before.visible) return
-    await tab.mouse.click(offset.x + before.rect.x + 14, offset.y + before.rect.y + 14)
-    await sleep(800)
-  })
-
-  // 点回主文档时，子框架的卡片该自己收掉（它收不到主文档的 mousedown）。
-  await scenario('iframe-card-dismissed-from-parent', 'cross', async ({ frame, offset }) => {
-    await drag(await boxIn(frame, '#fp'), offset)
-    const before = await probe(frame)
-    if (before.visible) {
+  await scenario(
+    'iframe-card-opens',
+    'cross',
+    async ({ frame, offset }) => {
+      await drag(await boxIn(frame, '#fp'), offset)
+      const before = await probe(frame)
+      if (!before.visible) return
       await tab.mouse.click(offset.x + before.rect.x + 14, offset.y + before.rect.y + 14)
       await sleep(800)
-    }
-    await tab.mouse.click(600, 60)
-    await sleep(500)
-  })
+    },
+    (state) => state.cardVisible,
+  )
+
+  // 点回主文档时，子框架的卡片该自己收掉（它收不到主文档的 mousedown）。
+  await scenario(
+    'iframe-card-dismissed-from-parent',
+    'cross',
+    async ({ frame, offset }) => {
+      await drag(await boxIn(frame, '#fp'), offset)
+      const before = await probe(frame)
+      if (before.visible) {
+        await tab.mouse.click(offset.x + before.rect.x + 14, offset.y + before.rect.y + 14)
+        await sleep(800)
+      }
+      await tab.mouse.click(600, 60)
+      await sleep(500)
+    },
+    (state) => !state.cardVisible,
+  )
 
   await scenario('second-selection-after-card', null, async ({ frame, offset }) => {
     await drag(await boxIn(frame, '#en'), offset)
@@ -226,5 +243,5 @@ try {
   })
 } finally {
   await browser.close()
-  server.close()
+  await closeServer(server)
 }

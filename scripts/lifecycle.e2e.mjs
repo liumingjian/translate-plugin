@@ -5,6 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import puppeteer from 'puppeteer-core'
+import { closeServer } from './e2e/harness.mjs'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const DIST = path.join(ROOT, 'dist')
@@ -175,7 +176,7 @@ try {
   }))
 } finally {
   await browser.close()
-  server.close()
+  await closeServer(server)
   fs.rmSync(tempDirectory, { recursive: true, force: true })
 }
 

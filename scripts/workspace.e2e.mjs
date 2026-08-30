@@ -5,6 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import puppeteer from 'puppeteer-core'
+import { closeServer } from './e2e/harness.mjs'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const DIST = path.join(ROOT, 'dist')
@@ -341,7 +342,10 @@ try {
   await workspace.waitForFunction(
     () => document.querySelector('#result')?.textContent === '第一段第二段',
   )
-  assert.equal(imageUrlOf(requests[beforeRecovery + 3]), failedImage)
+  assert(
+    imageUrlOf(requests[beforeRecovery + 3]) === failedImage,
+    'workspace retry must reuse the crop',
+  )
 
   responseMode = 'partial'
   beforeRecovery = requests.length
@@ -644,7 +648,7 @@ try {
   )
 } finally {
   await browser.close()
-  server.close()
+  await closeServer(server)
   fs.rmSync(tempDirectory, { recursive: true, force: true })
 }
 
