@@ -2,6 +2,8 @@ import fs from 'node:fs'
 import http from 'node:http'
 import path from 'node:path'
 import process from 'node:process'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
 import puppeteer from 'puppeteer-core'
 
@@ -10,6 +12,7 @@ export const DIST = path.join(ROOT, 'dist')
 export const FIXTURES = path.join(ROOT, 'tests', 'fixtures')
 export const CHROME =
   process.env.TP_CHROME ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+const execFileAsync = promisify(execFile)
 
 export function loadRealServiceEnv() {
   const envFile = process.env.TP_ENV_FILE ?? path.join(path.dirname(ROOT), 'translate-plugin', '.env.local')
@@ -20,14 +23,23 @@ export function loadRealServiceEnv() {
   }
 }
 
-export async function launchExtension() {
-  const browser = await puppeteer.launch({
+export async function launchBrowser(options = {}) {
+  return puppeteer.launch({
     executablePath: CHROME,
     headless: process.env.TP_HEADLESS === '0' ? false : true,
     pipe: true,
     ignoreDefaultArgs: ['--disable-extensions'],
-    args: ['--enable-unsafe-extension-debugging', '--no-first-run', '--no-default-browser-check'],
+    userDataDir: options.userDataDir ?? process.env.TP_E2E_BROWSER_PROFILE,
+    args: [
+      '--enable-unsafe-extension-debugging',
+      '--no-first-run',
+      '--no-default-browser-check',
+      ...(options.args ?? []),
+    ],
   })
+}
+
+export async function loadExtension(browser) {
   const cdp = await browser.target().createCDPSession()
   const { id: extensionId } = await cdp.send('Extensions.loadUnpacked', { path: DIST })
   const extensionOrigin = `chrome-extension://${extensionId}`
@@ -38,7 +50,12 @@ export async function launchExtension() {
   )
   const worker = await target.worker()
   if (!worker) throw new Error('extension service worker did not start')
-  return { browser, extensionOrigin, worker }
+  return { extensionOrigin, extensionId, worker }
+}
+
+export async function launchExtension(options) {
+  const browser = await launchBrowser(options)
+  return { browser, ...(await loadExtension(browser)) }
 }
 
 export async function setSettings(worker, settings) {
@@ -63,6 +80,77 @@ export async function closeServer(server) {
   if (!server?.listening) return
   server.closeAllConnections?.()
   await new Promise((resolve) => server.close(resolve))
+}
+
+export async function drag(page, fromX, fromY, toX, toY, steps = 6) {
+  await page.mouse.move(fromX, fromY)
+  await page.mouse.down()
+  await page.mouse.move(toX, toY, { steps })
+  await page.mouse.up()
+}
+
+export async function pressShiftArrow(page, key) {
+  await page.keyboard.down('Shift')
+  await page.keyboard.press(key)
+  await page.keyboard.up('Shift')
+}
+
+export async function waitForCount(items, count, timeout = 5_000) {
+  const deadline = Date.now() + timeout
+  while (items.length < count && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 25))
+  }
+  if (items.length !== count) {
+    throw new Error(`expected ${count} records, received ${items.length}`)
+  }
+}
+
+/**
+ * CDP key events start in a renderer and cannot exercise Chrome's command accelerator.
+ * This opt-in macOS path sends the key chord at the OS level. It requires a headed run
+ * and Accessibility permission for the process running pnpm.
+ */
+export async function triggerBrowserShortcut(processId) {
+  if (process.env.TP_E2E_OS_SHORTCUT !== '1') {
+    return { executed: false, reason: 'set TP_E2E_OS_SHORTCUT=1 for the macOS platform harness' }
+  }
+  if (process.platform !== 'darwin' || process.env.TP_HEADLESS !== '0') {
+    throw new Error('TP_E2E_OS_SHORTCUT requires macOS and TP_HEADLESS=0')
+  }
+  if (!process.env.TP_E2E_QUARTZ_HELPER || !processId) {
+    throw new Error('TP_E2E_OS_SHORTCUT requires TP_E2E_QUARTZ_HELPER and a Chrome process id')
+  }
+  await execFileAsync(process.env.TP_E2E_QUARTZ_HELPER, [String(processId)])
+  return { executed: true, reason: null }
+}
+
+export async function respondToBrowserPermissionPrompt(action, windowTitle = '图片翻译工作区') {
+  if (process.env.TP_E2E_OS_PERMISSIONS !== '1') {
+    return { executed: false, reason: 'set TP_E2E_OS_PERMISSIONS=1 for the macOS platform harness' }
+  }
+  if (process.platform !== 'darwin' || process.env.TP_HEADLESS !== '0') {
+    throw new Error('TP_E2E_OS_PERMISSIONS requires macOS and TP_HEADLESS=0')
+  }
+  const application = process.env.TP_CHROME_APP ?? 'Google Chrome'
+  const focusWindow = [
+    '-e', `tell application ${JSON.stringify(application)}`,
+    '-e', 'activate',
+    '-e', `set targetWindow to first window whose name contains ${JSON.stringify(windowTitle)}`,
+    '-e', 'set index of targetWindow to 1',
+    '-e', 'end tell',
+    '-e', 'delay 0.3',
+  ]
+  const tabCount = Number.parseInt(process.env.TP_E2E_OS_PERMISSION_TABS ?? '1', 10)
+  const acceptKeys = Array.from({ length: Math.max(0, tabCount) }, () => [
+    '-e', 'tell application "System Events" to key code 48',
+    '-e', 'delay 0.2',
+  ]).flat()
+  acceptKeys.push('-e', 'tell application "System Events" to key code 36')
+  const keystrokes = action === 'accept'
+    ? acceptKeys
+    : ['-e', 'tell application "System Events" to key code 53']
+  await execFileAsync('/usr/bin/osascript', [...focusWindow, ...keystrokes])
+  return { executed: true, reason: null }
 }
 
 export function createFixtureServer({ pageHtml, onChat }) {

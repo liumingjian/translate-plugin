@@ -3,14 +3,7 @@ import fs from 'node:fs'
 import http from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
-import puppeteer from 'puppeteer-core'
-import { closeServer } from './e2e/harness.mjs'
-
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const DIST = path.join(ROOT, 'dist')
-const CHROME =
-  process.env.TP_CHROME ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+import { closeServer, drag, launchExtension, listen, waitForCount } from './e2e/harness.mjs'
 const tempDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'translate-plugin-lifecycle-'))
 const fixturePath = path.join(tempDirectory, 'lifecycle.png')
 const requests = []
@@ -48,26 +41,10 @@ const server = http.createServer((request, response) => {
   })
 })
 
-await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
-const baseUrl = `http://127.0.0.1:${server.address().port}`
-const browser = await puppeteer.launch({
-  executablePath: CHROME,
-  headless: process.env.TP_HEADLESS === '0' ? false : true,
-  pipe: true,
-  ignoreDefaultArgs: ['--disable-extensions'],
-  args: ['--enable-unsafe-extension-debugging', '--no-first-run', '--no-default-browser-check'],
-})
+const baseUrl = await listen(server)
+const { browser, extensionOrigin, worker } = await launchExtension()
 
 try {
-  const cdp = await browser.target().createCDPSession()
-  const { id: extensionId } = await cdp.send('Extensions.loadUnpacked', { path: DIST })
-  const extensionOrigin = `chrome-extension://${extensionId}`
-  const workerTarget = await browser.waitForTarget(
-    (target) => target.type() === 'service_worker' && target.url().startsWith(extensionOrigin),
-    { timeout: 20_000 },
-  )
-  const worker = await workerTarget.worker()
-  assert(worker)
   await worker.evaluate(
     async (settings) => chrome.storage.local.set({ settings }),
     {
@@ -247,19 +224,8 @@ async function clickCardButton(page, label) {
   }, label)
 }
 
-async function drag(page, fromX, fromY, toX, toY) {
-  await page.mouse.move(fromX, fromY)
-  await page.mouse.down()
-  await page.mouse.move(toX, toY, { steps: 8 })
-  await page.mouse.up()
-}
-
 async function waitForRequestCount(count) {
-  const deadline = Date.now() + 10_000
-  while (requests.length < count && Date.now() < deadline) {
-    await new Promise((resolve) => setTimeout(resolve, 25))
-  }
-  assert.equal(requests.length, count)
+  await waitForCount(requests, count, 10_000)
 }
 
 async function waitForClosed(index) {

@@ -5,15 +5,7 @@
  */
 import assert from 'node:assert/strict'
 import http from 'node:http'
-import { fileURLToPath } from 'node:url'
-import path from 'node:path'
-import puppeteer from 'puppeteer-core'
-import { closeServer } from './e2e/harness.mjs'
-
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const DIST = path.join(ROOT, 'dist')
-const CHROME =
-  process.env.TP_CHROME ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+import { closeServer, launchExtension, listen } from './e2e/harness.mjs'
 
 const FRAME = `<!doctype html><html lang="en"><head><meta charset="utf-8"></head>
 <body style="font:16px/1.7 sans-serif;margin:8px">
@@ -55,16 +47,8 @@ const server = http.createServer((req, res) => {
   const origin = `http://localhost:${server.address().port}/`
   serve(req.url === '/frame' ? FRAME : page(origin))(req, res)
 })
-await new Promise((r) => server.listen(0, '127.0.0.1', r))
-const origin = `http://127.0.0.1:${server.address().port}/`
-
-const browser = await puppeteer.launch({
-  executablePath: CHROME,
-  headless: process.env.TP_HEADLESS === '0' ? false : true,
-  pipe: true,
-  ignoreDefaultArgs: ['--disable-extensions'],
-  args: ['--enable-unsafe-extension-debugging', '--no-first-run', '--no-default-browser-check'],
-})
+const origin = `${await listen(server)}/`
+const { browser } = await launchExtension()
 
 /** 每个框架各有一套浮层，探针得指定在哪个框架里找。 */
 const PROBE = () => {
@@ -90,8 +74,6 @@ const PROBE = () => {
 }
 
 try {
-  const cdp = await browser.target().createCDPSession()
-  await cdp.send('Extensions.loadUnpacked', { path: DIST })
   await sleep(2000)
   const tab = await browser.newPage()
   await tab.setViewport({ width: 1100, height: 800 })

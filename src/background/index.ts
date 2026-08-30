@@ -155,30 +155,24 @@ async function translateText(
     return
   }
 
-  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-    if (attempt > 0) {
-      await sleep(RETRY_BACKOFF_MS[attempt - 1] ?? 1200, signal)
-      if (signal.aborted) return
-    }
-
-    const outcome = await attemptTranslate(
+  const outcome = await executeWithRetry(
+    () => attemptTranslate(
       settings,
       textChatBody(settings, check.text),
       false,
       signal,
       emit,
-    )
-    if (outcome.kind === 'aborted') return
-    if (outcome.kind === 'ok') {
-      // 被掐断的流不进缓存，否则半截译文会一直命中，用户重试也甩不掉。
-      if (outcome.complete) cache.set(cacheKey, outcome.collected)
-      emit({ type: 'done', cached: false })
-      return
-    }
-    if (outcome.retryable && attempt < MAX_ATTEMPTS - 1) continue
-    emit({ type: 'error', kind: outcome.errorKind, detail: outcome.detail })
+    ),
+    signal,
+  )
+  if (outcome.kind === 'aborted') return
+  if (outcome.kind === 'ok') {
+    // 被掐断的流不进缓存，否则半截译文会一直命中，用户重试也甩不掉。
+    if (outcome.complete) cache.set(cacheKey, outcome.collected)
+    emit({ type: 'done', cached: false })
     return
   }
+  emit({ type: 'error', kind: outcome.errorKind, detail: outcome.detail })
 }
 
 async function translateImage(
@@ -195,37 +189,53 @@ async function translateImage(
     return
   }
   const settings = await getSettings()
+  if (!settings.imagePrivacyAccepted) {
+    emit({ type: 'error', kind: 'image-privacy-required' })
+    return
+  }
   if (settings.apiKey.trim() === '') {
     emit({ type: 'error', kind: 'no-api-key' })
     return
   }
-  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-    if (attempt > 0) {
-      await sleep(RETRY_BACKOFF_MS[attempt - 1] ?? 1200, signal)
-      if (signal.aborted) return
-    }
-    const outcome = await attemptTranslate(
+  const outcome = await executeWithRetry(
+    () => attemptTranslate(
       settings,
       imageChatBody(settings, imageDataUrl),
       true,
       signal,
       emit,
-    )
-    if (outcome.kind === 'aborted') return
-    if (outcome.kind === 'ok') {
-      emit({ type: 'done', cached: false })
-      return
-    }
-    if (outcome.retryable && attempt < MAX_ATTEMPTS - 1) continue
-    emit({ type: 'error', kind: outcome.errorKind, detail: outcome.detail })
+    ),
+    signal,
+  )
+  if (outcome.kind === 'aborted') return
+  if (outcome.kind === 'ok') {
+    emit({ type: 'done', cached: false })
     return
   }
+  emit({ type: 'error', kind: outcome.errorKind, detail: outcome.detail })
 }
 
 type Attempt =
   | { kind: 'ok'; collected: CachedTranslation; complete: boolean }
   | { kind: 'aborted' }
   | { kind: 'failed'; retryable: boolean; errorKind: TranslationErrorKind; detail?: string }
+
+async function executeWithRetry(
+  attempt: () => Promise<Attempt>,
+  signal: AbortSignal,
+): Promise<Attempt> {
+  for (let index = 0; index < MAX_ATTEMPTS; index++) {
+    if (index > 0) {
+      await sleep(RETRY_BACKOFF_MS[index - 1] ?? 1200, signal)
+      if (signal.aborted) return { kind: 'aborted' }
+    }
+    const outcome = await attempt()
+    if (outcome.kind !== 'failed' || !outcome.retryable || index === MAX_ATTEMPTS - 1) {
+      return outcome
+    }
+  }
+  return { kind: 'aborted' }
+}
 
 /**
  * 跑一次完整请求。只有在**还没吐出任何译文**时失败才允许重试 ——

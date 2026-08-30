@@ -18,6 +18,7 @@ export type TranslationErrorKind =
   | 'image-too-small'
   | 'image-too-large'
   | 'image-unsupported'
+  | 'image-privacy-required'
   | 'no-text'
 
 /** content script → service worker：一次翻译请求。 */

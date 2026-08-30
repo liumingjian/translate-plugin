@@ -8,6 +8,9 @@ export const DEFAULT_BASE_URL = 'https://api.vipsyfw.com'
 export const DEFAULT_MODEL = 'gpt-5.4-mini'
 export const DEFAULT_IMAGE_MODEL = 'gpt-5.5'
 
+export const IMAGE_PRIVACY_DISCLOSURE =
+  '确认后，选中的图片区域会发送到你配置的翻译服务。图片仅保留在内存中，不会写入翻译缓存。是否继续？'
+
 /** 导入图片的原始文件上限；裁剪后的请求体还会按像素数进一步缩放。 */
 export const MAX_IMAGE_FILE_BYTES = 20 * 1024 * 1024
 

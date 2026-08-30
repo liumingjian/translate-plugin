@@ -1,14 +1,14 @@
 import assert from 'node:assert/strict'
 import http from 'node:http'
-import path from 'node:path'
-import { fileURLToPath } from 'node:url'
-import puppeteer from 'puppeteer-core'
-import { closeServer } from './e2e/harness.mjs'
-
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const DIST = path.join(ROOT, 'dist')
-const CHROME =
-  process.env.TP_CHROME ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+import {
+  closeServer,
+  drag,
+  launchExtension,
+  listen,
+  pressShiftArrow,
+  triggerBrowserShortcut,
+  waitForCount,
+} from './e2e/harness.mjs'
 
 const requests = []
 let lastCaptureAt = 0
@@ -86,27 +86,11 @@ const server = http.createServer((request, response) => {
   })
 })
 
-await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
-const baseUrl = `http://127.0.0.1:${server.address().port}`
+const baseUrl = await listen(server)
 
-const browser = await puppeteer.launch({
-  executablePath: CHROME,
-  headless: process.env.TP_HEADLESS === '0' ? false : true,
-  pipe: true,
-  ignoreDefaultArgs: ['--disable-extensions'],
-  args: ['--enable-unsafe-extension-debugging', '--no-first-run', '--no-default-browser-check'],
-})
+const { browser, extensionOrigin, worker } = await launchExtension()
 
 try {
-  const cdp = await browser.target().createCDPSession()
-  const { id: extensionId } = await cdp.send('Extensions.loadUnpacked', { path: DIST })
-  const extensionOrigin = `chrome-extension://${extensionId}`
-  const workerTarget = await browser.waitForTarget(
-    (target) => target.type() === 'service_worker' && target.url().startsWith(extensionOrigin),
-    { timeout: 20_000 },
-  )
-  const worker = await workerTarget.worker()
-  assert(worker)
   await worker.evaluate(
     async (settings) => chrome.storage.local.set({ settings }),
     {
@@ -114,7 +98,7 @@ try {
       apiKey: 'e2e-key',
       model: 'text-model',
       imageModel: 'deterministic-image-model',
-      imagePrivacyAccepted: true,
+      imagePrivacyAccepted: false,
       autoReadClipboard: false,
     },
   )
@@ -136,15 +120,37 @@ try {
   await new Promise((resolve) => setTimeout(resolve, 1_500))
   await page.focus('#focusTarget')
 
-  // Chrome 自己报告默认快捷键已注册；菜单入口随后走完整的真实截图链路。
-  // CDP 键盘事件进入渲染进程时已经错过浏览器级 accelerator 分发阶段。
   await beginScreenshot(browser, worker, extensionOrigin, page)
+  assert.equal(await screenshotState(page), 'awaiting-privacy')
+  assert.equal(requests.length, 0, 'first-use disclosure must block image requests')
+  assert.match(await screenshotPrivacyText(page), /发送到你配置的翻译服务/)
+  assert.equal(await screenshotModeFocusedName(page), '同意并继续')
+  await clickShadowButton(page, '同意并继续')
+  await page.waitForFunction(
+    () => window.__findScreenshotDialog()?.dataset.state === 'waiting-for-selection',
+  )
+  assert.equal(
+    await worker.evaluate(async () =>
+      (await chrome.storage.local.get('settings')).settings.imagePrivacyAccepted,
+    ),
+    true,
+  )
+  let shortcut = process.env.TP_E2E_OS_SHORTCUT === '1'
+    ? { executed: false, reason: null }
+    : await triggerBrowserShortcut()
+  if (process.env.TP_E2E_OS_SHORTCUT === '1') {
+    await page.keyboard.press('Escape')
+    await page.waitForFunction(() => !window.__findScreenshotDialog())
+    shortcut = await triggerBrowserShortcut(browser.process()?.pid)
+    await waitForScreenshotMode(page)
+  }
   assert.equal(await countScreenshotModes(page), 1)
   assert.equal(await countFrameScreenshotModes(page), 0)
   assert.equal(await screenshotState(page), 'waiting-for-selection')
   assert.equal(await screenshotHandleCount(page), 8)
   assert.equal(await screenshotModeFocusedName(page), '截图翻译框选')
   const firstFrozenSource = await frozenSource(page)
+  const firstFrozenMetrics = await frozenMetrics(page)
   const tickBefore = await page.$eval('#ticker', (element) => element.dataset.tick)
   await new Promise((resolve) => setTimeout(resolve, 180))
   const tickAfter = await page.$eval('#ticker', (element) => element.dataset.tick)
@@ -238,12 +244,10 @@ try {
   const pixels = await decodeImage(page, content[1].image_url.url)
   assert.deepEqual(
     { width: pixels.width, height: pixels.height },
-    {
-      width: confirmedRect.right - confirmedRect.left,
-      height: confirmedRect.bottom - confirmedRect.top,
-    },
+    mappedSize(selection, firstFrozenMetrics),
   )
-  assert.deepEqual(pixels.center, [30, 80, 220, 255])
+  if (!shortcut.executed) assert.deepEqual(pixels.center, [30, 80, 220, 255])
+  else assert.equal(pixels.center[3], 255, 'shortcut capture must contain opaque image pixels')
 
   await clickCardButton(page, '复制译文')
   await page.waitForFunction(() => window.__findTranslationCard()?.copyLabel === '已复制')
@@ -473,7 +477,10 @@ try {
 
   console.log(JSON.stringify({
     ok: true,
-    entries: ['menu', 'registered Alt+Shift+S'],
+    entries: ['menu'],
+    browserShortcut: shortcut.executed
+      ? 'macOS accelerator exercised'
+      : `not exercised: ${shortcut.reason}`,
     frozenTopFrameOnly: true,
     restoredLivePage: true,
     selectionInteractions: ['move', 'n', 'ne', 'e', 'se', 's', 'sw', 'w', 'nw'],
@@ -616,6 +623,12 @@ async function screenshotModeFocusedName(page) {
   })
 }
 
+async function screenshotPrivacyText(page) {
+  return page.evaluate(() =>
+    window.__findScreenshotDialog()?.querySelector('.privacy p')?.textContent ?? '',
+  )
+}
+
 async function screenshotCardFocusedName(page) {
   return page.evaluate(() => {
     const active = window.__findScreenshotCard()?.getRootNode().activeElement
@@ -641,25 +654,12 @@ async function shadowButtonDisabled(page, label) {
   }, label)
 }
 
-async function drag(page, fromX, fromY, toX, toY) {
-  await page.mouse.move(fromX, fromY)
-  await page.mouse.down()
-  await page.mouse.move(toX, toY, { steps: 8 })
-  await page.mouse.up()
-}
-
 async function doubleClick(page, x, y) {
   await page.mouse.move(x, y)
   await page.mouse.down({ clickCount: 1 })
   await page.mouse.up({ clickCount: 1 })
   await page.mouse.down({ clickCount: 2 })
   await page.mouse.up({ clickCount: 2 })
-}
-
-async function pressShiftArrow(page, key) {
-  await page.keyboard.down('Shift')
-  await page.keyboard.press(key)
-  await page.keyboard.up('Shift')
 }
 
 function assertHandleMoved(handle, before, after) {
@@ -682,11 +682,7 @@ function mappedSize(rect, image) {
 }
 
 async function waitForRequestCount(count) {
-  const deadline = Date.now() + 10_000
-  while (requests.length < count && Date.now() < deadline) {
-    await new Promise((resolve) => setTimeout(resolve, 25))
-  }
-  assert.equal(requests.length, count)
+  await waitForCount(requests, count, 10_000)
 }
 
 async function screenshotCard(page) {

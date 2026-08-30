@@ -21,6 +21,7 @@ const ERROR_MESSAGES: Record<TranslationErrorKind, string> = {
   'image-too-small': '框选区域太小',
   'image-too-large': '图片过大',
   'image-unsupported': '截图模型不支持图片',
+  'image-privacy-required': '请先确认图片上传说明',
   'no-text': '未识别到可翻译文字',
 }
 

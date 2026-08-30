@@ -1,6 +1,7 @@
-import type { Rect } from '../shared/position'
 import { cropImageDataUrl } from '../shared/image'
+import type { Rect } from '../shared/position'
 import { checkSelection } from '../shared/selection'
+import { getSettings, saveSettings } from '../shared/settings'
 import { TranslationClient } from '../shared/translationClient'
 import { PORT_NAME } from '../shared/types'
 import type { ContentRequest, TranslateEvent } from '../shared/types'
@@ -21,6 +22,7 @@ const screenshotClient = new TranslationClient()
 let screenshotRevision = 0
 let currentScreenshot: ConfirmedScreenshot | null = null
 let currentScreenshotCrop: string | null = null
+let screenshotStartRevision = 0
 
 const overlay = new Overlay({
   onIconClick: () => {
@@ -65,13 +67,20 @@ const screenshotCard = window === window.top
   : null
 
 const screenshotMode = window === window.top
-  ? new ScreenshotMode({ onConfirm: (screenshot) => void confirmScreenshot(screenshot) })
+  ? new ScreenshotMode({
+      onConfirm: (screenshot) => void confirmScreenshot(screenshot),
+      onAcceptPrivacy: async () => {
+        const settings = await getSettings()
+        await saveSettings({ ...settings, imagePrivacyAccepted: true })
+        return true
+      },
+    })
   : null
 
 if (window === window.top) {
   chrome.runtime.onMessage.addListener((message: ContentRequest) => {
     if (message?.type !== 'begin-screenshot') return
-    beginScreenshot(message.imageDataUrl)
+    void beginScreenshot(message.imageDataUrl)
   })
 }
 
@@ -128,15 +137,18 @@ function dismiss(): void {
   closePort()
 }
 
-function beginScreenshot(imageDataUrl: string): void {
+async function beginScreenshot(imageDataUrl: string): Promise<void> {
   if (!screenshotMode) return
+  const startRevision = ++screenshotStartRevision
+  const settings = await getSettings()
+  if (startRevision !== screenshotStartRevision) return
   dismiss()
   screenshotCard?.close()
   screenshotClient.cancel()
   screenshotRevision++
   currentScreenshot = null
   currentScreenshotCrop = null
-  screenshotMode.begin(imageDataUrl)
+  screenshotMode.begin(imageDataUrl, settings.imagePrivacyAccepted)
 }
 
 async function confirmScreenshot(screenshot: ConfirmedScreenshot): Promise<void> {

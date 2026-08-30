@@ -3,14 +3,16 @@ import fs from 'node:fs'
 import http from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
-import puppeteer from 'puppeteer-core'
-import { closeServer } from './e2e/harness.mjs'
-
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const DIST = path.join(ROOT, 'dist')
-const CHROME =
-  process.env.TP_CHROME ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+import {
+  closeServer,
+  drag,
+  launchBrowser,
+  listen,
+  loadExtension,
+  pressShiftArrow,
+  respondToBrowserPermissionPrompt,
+  waitForCount,
+} from './e2e/harness.mjs'
 const PNG = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
   'base64',
@@ -67,16 +69,9 @@ const server = http.createServer((request, response) => {
   })
 })
 
-await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
-const baseUrl = `http://127.0.0.1:${server.address().port}`
+const baseUrl = await listen(server)
 
-const browser = await puppeteer.launch({
-  executablePath: CHROME,
-  headless: process.env.TP_HEADLESS === '0' ? false : true,
-  pipe: true,
-  ignoreDefaultArgs: ['--disable-extensions'],
-  args: ['--enable-unsafe-extension-debugging', '--no-first-run', '--no-default-browser-check'],
-})
+const browser = await launchBrowser({ userDataDir: process.env.TP_E2E_CLIPBOARD_PROFILE })
 
 try {
   // 扩展安装前已打开的页面没有 content script，稳定复现顶层框架无法承载截图 UI。
@@ -97,15 +92,7 @@ try {
   })
   fs.writeFileSync(fixturePath, Buffer.from(fixtureDataUrl.split(',')[1], 'base64'))
 
-  const cdp = await browser.target().createCDPSession()
-  const { id: extensionId } = await cdp.send('Extensions.loadUnpacked', { path: DIST })
-  const extensionOrigin = `chrome-extension://${extensionId}`
-  const workerTarget = await browser.waitForTarget(
-    (target) => target.type() === 'service_worker' && target.url().startsWith(extensionOrigin),
-    { timeout: 20_000 },
-  )
-  const worker = await workerTarget.worker()
-  assert(worker)
+  const { extensionOrigin, worker } = await loadExtension(browser)
   await worker.evaluate(
     async (settings) => chrome.storage.local.set({ settings }),
     {
@@ -452,142 +439,94 @@ try {
     })
   }
 
-  assert.equal(await hasClipboardReadPermission(), false)
+  const initialClipboardPermission = await hasClipboardReadPermission()
+  if (!process.env.TP_E2E_CLIPBOARD_PROFILE) assert.equal(initialClipboardPermission, false)
   await dropImage('dragged-image.png')
   await workspace.waitForFunction(
     () => document.querySelector('#sourceMeta')?.textContent === 'dragged-image.png',
   )
-  assert.equal(await hasClipboardReadPermission(), false)
+  assert.equal(await hasClipboardReadPermission(), initialClipboardPermission)
 
   await workspace.click('#clear')
   await pasteClipboardImage('#emptyState')
   await workspace.waitForFunction(
     () => document.querySelector('#sourceMeta')?.textContent === '系统剪贴板图片',
   )
-  assert.equal(await hasClipboardReadPermission(), false)
-
-  // Headless Chrome does not expose the extension permission bubble through CDP.
-  // Replace only its decision; acquisition still uses Chrome's real clipboard APIs.
-  await workspace.evaluate(() => {
-    Object.defineProperty(chrome.permissions, 'request', {
-      configurable: true,
-      value: async () => false,
-    })
-  })
-  await workspace.click('#autoReadClipboard')
-  await workspace.waitForFunction(
-    () =>
-      document.querySelector('#autoReadClipboard')?.checked === false &&
-      document.querySelector('#imageStatus')?.textContent?.includes('未授予剪贴板读取权限'),
-    { timeout: 10_000 },
-  )
-  assert.equal(await hasClipboardReadPermission(), false)
-  assert.equal(
-    await workspace.$eval('#sourceMeta', (element) => element.textContent),
-    '系统剪贴板图片',
-  )
+  assert.equal(await hasClipboardReadPermission(), initialClipboardPermission)
 
   await browser.defaultBrowserContext().overridePermissions(extensionOrigin, [
     'clipboard-read',
     'clipboard-write',
   ])
-  await workspace.evaluate(() => {
-    const permissionState = { granted: false }
-    Object.defineProperties(chrome.permissions, {
-      contains: {
-        configurable: true,
-        value: async () => permissionState.granted,
-      },
-      remove: {
-        configurable: true,
-        value: async () => {
-          permissionState.granted = false
-          return true
-        },
-      },
-      request: {
-        configurable: true,
-        value: async () => {
-          permissionState.granted = true
-          return true
-        },
-      },
-    })
-    window.__e2eClipboardPermission = permissionState
-  })
+  let permissionBoundary
+  if (initialClipboardPermission) {
+    await workspace.click('#clear')
+    await writeClipboardImage()
+    await workspace.click('#autoReadClipboard')
+    await workspace.waitForFunction(
+      () => document.querySelector('#autoReadClipboard')?.checked === true,
+      { timeout: 10_000 },
+    )
+    permissionBoundary = { grant: 'Chrome optional permission from controlled profile' }
+  } else if (process.env.TP_E2E_MANUAL_PERMISSIONS === '1') {
+    await workspace.click('#clear')
+    await writeClipboardImage()
+    await workspace.click('#autoReadClipboard')
+    await waitForClipboardPermissionDecision(worker, workspace, 120_000)
+    permissionBoundary = { grantAttempt: 'Chrome optional permission prompt answered manually' }
+  } else if (process.env.TP_E2E_OS_PERMISSIONS === '1') {
+    const permissionAction = process.env.TP_E2E_OS_PERMISSION_ACTION ?? 'deny'
+    await workspace.click('#autoReadClipboard')
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    await respondToBrowserPermissionPrompt(permissionAction)
+    await waitForClipboardPermissionDecision(worker, workspace)
+    permissionBoundary = permissionAction === 'accept'
+      ? { grantAttempt: 'Chrome optional permission prompt answered by OS Tab/Enter' }
+      : { deny: 'Chrome optional permission prompt dismissed by OS Escape' }
+  } else {
+    permissionBoundary = {
+      request: 'not exercised: requires headed Chrome browser UI; CDP cannot inspect the prompt',
+    }
+  }
+  const permissionGranted = await hasClipboardReadPermission()
 
-  await workspace.click('#clear')
-  await writeClipboardImage()
-  await workspace.click('#autoReadClipboard')
-  await workspace.waitForFunction(
-    () =>
-      document.querySelector('#autoReadClipboard')?.checked === true &&
-      document.querySelector('#sourceMeta')?.textContent === '系统剪贴板图片',
-    { timeout: 10_000 },
-  )
+  if (permissionGranted) {
+    await workspace.waitForFunction(
+      () => document.querySelector('#sourceMeta')?.textContent === '系统剪贴板图片',
+      { timeout: 10_000 },
+    )
+    await workspace.click('#clear')
+    await writeClipboardImage()
+    await workspace.reload({ waitUntil: 'load' })
+    await workspace.waitForFunction(
+      () =>
+        document.querySelector('#autoReadClipboard')?.checked === true &&
+        document.querySelector('#sourceMeta')?.textContent === '系统剪贴板图片',
+      { timeout: 10_000 },
+    )
 
-  await workspace.evaluateOnNewDocument(() => {
-    const permissionState = { granted: true }
-    Object.defineProperties(chrome.permissions, {
-      contains: { configurable: true, value: async () => permissionState.granted },
-      remove: {
-        configurable: true,
-        value: async () => {
-          permissionState.granted = false
-          return true
-        },
-      },
-      request: {
-        configurable: true,
-        value: async () => {
-          permissionState.granted = true
-          return true
-        },
-      },
-    })
-    window.__e2eClipboardPermission = permissionState
-  })
-  await workspace.click('#clear')
-  await writeClipboardImage()
-  await workspace.reload({ waitUntil: 'load' })
-  await workspace.waitForFunction(
-    () =>
-      document.querySelector('#autoReadClipboard')?.checked === true &&
-      document.querySelector('#sourceMeta')?.textContent === '系统剪贴板图片',
-    { timeout: 10_000 },
-  )
+    await workspace.evaluate(() => navigator.clipboard.writeText('clipboard contains text only'))
+    await workspace.reload({ waitUntil: 'load' })
+    await workspace.waitForFunction(
+      () => !document.querySelector('#emptyState')?.classList.contains('hidden'),
+    )
+    assert.equal(await workspace.$eval('#imageStatus', (element) => element.textContent), '')
 
-  await workspace.evaluate(() => navigator.clipboard.writeText('clipboard contains text only'))
-  await workspace.click('#autoReadClipboard')
-  await workspace.waitForFunction(
-    () => document.querySelector('#autoReadClipboard')?.checked === false,
-  )
-  await workspace.click('#autoReadClipboard')
-  await workspace.waitForFunction(
-    () => document.querySelector('#autoReadClipboard')?.checked === true,
-    { timeout: 10_000 },
-  )
-  assert.equal(
-    await workspace.$eval('#sourceMeta', (element) => element.textContent),
-    '系统剪贴板图片',
-  )
-  assert.equal(await workspace.$eval('#imageStatus', (element) => element.textContent), '')
-
-  await workspace.evaluate(() => {
-    window.__e2eClipboardPermission.granted = false
-    window.dispatchEvent(new FocusEvent('focus'))
-  })
-  await workspace.waitForFunction(
-    () => document.querySelector('#autoReadClipboard')?.checked === false,
-  )
-  assert.match(
-    await workspace.$eval('#imageStatus', (element) => element.textContent),
-    /自动读取已关闭/,
-  )
-  assert.equal(
-    await workspace.$eval('#sourceMeta', (element) => element.textContent),
-    '系统剪贴板图片',
-  )
+    await workspace.click('#autoReadClipboard')
+    await workspace.waitForFunction(
+      () => document.querySelector('#autoReadClipboard')?.checked === false,
+    )
+    await waitForClipboardPermission(worker, false)
+    assert.match(
+      await workspace.$eval('#imageStatus', (element) => element.textContent),
+      /自动读取已关闭/,
+    )
+  } else if (process.env.TP_E2E_OS_PERMISSIONS === '1') {
+    assert.match(
+      await workspace.$eval('#imageStatus', (element) => element.textContent),
+      /未授予剪贴板读取权限/,
+    )
+  }
 
   await dropImage('after-revocation.png')
   await workspace.waitForFunction(
@@ -639,9 +578,15 @@ try {
       cropPixels: `${encodedCrop.width}x${encodedCrop.height}`,
       explicitSubmitMethods: ['button', 'double-click', 'Enter'],
       keyboardCrop: ['focus', 'nudge', 'resize'],
-      imageImports: ['file', 'drop', 'manual-paste', 'auto-read'],
-      clipboardDenial: true,
-      clipboardRevocation: true,
+      imageImports: permissionGranted
+        ? ['file', 'drop', 'manual-paste', 'auto-read']
+        : ['file', 'drop', 'manual-paste'],
+      clipboardPermission: permissionGranted
+        ? { ...permissionBoundary, revoke: 'Chrome optional permission', noImage: true }
+        : {
+            ...permissionBoundary,
+            grant: 'requires TP_E2E_MANUAL_PERMISSIONS or a pre-authorized profile',
+          },
       restrictedPageFallback: true,
       accessibility: ['popup-names', 'dark', 'high-dpr', 'narrow-viewport'],
     }),
@@ -652,19 +597,6 @@ try {
   fs.rmSync(tempDirectory, { recursive: true, force: true })
 }
 
-async function drag(page, fromX, fromY, toX, toY) {
-  await page.mouse.move(fromX, fromY)
-  await page.mouse.down()
-  await page.mouse.move(toX, toY, { steps: 6 })
-  await page.mouse.up()
-}
-
-async function pressShiftArrow(page, key) {
-  await page.keyboard.down('Shift')
-  await page.keyboard.press(key)
-  await page.keyboard.up('Shift')
-}
-
 async function elementBox(page, selector) {
   return page.$eval(selector, (element) => {
     const box = element.getBoundingClientRect()
@@ -673,11 +605,34 @@ async function elementBox(page, selector) {
 }
 
 async function waitForRequestCount(count) {
+  await waitForCount(requests, count)
+}
+
+async function waitForClipboardPermission(worker, expected) {
   const deadline = Date.now() + 5_000
-  while (requests.length < count && Date.now() < deadline) {
+  while (Date.now() < deadline) {
+    const actual = await worker.evaluate(() =>
+      chrome.permissions.contains({ permissions: ['clipboardRead'] }),
+    )
+    if (actual === expected) return
     await new Promise((resolve) => setTimeout(resolve, 25))
   }
-  assert.equal(requests.length, count)
+  throw new Error(`clipboardRead permission did not become ${expected}`)
+}
+
+async function waitForClipboardPermissionDecision(worker, workspace, timeout = 15_000) {
+  const deadline = Date.now() + timeout
+  while (Date.now() < deadline) {
+    const granted = await worker.evaluate(() =>
+      chrome.permissions.contains({ permissions: ['clipboardRead'] }),
+    )
+    const denied = await workspace.$eval('#imageStatus', (element) =>
+      element.textContent?.includes('未授予剪贴板读取权限') ?? false,
+    )
+    if (granted || denied) return
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  }
+  throw new Error('Chrome optional permission prompt did not settle after the OS response')
 }
 
 function imageUrlOf(request) {

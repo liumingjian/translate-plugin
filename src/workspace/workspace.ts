@@ -23,6 +23,7 @@ const ERROR_MESSAGES: Record<TranslationErrorKind, string> = {
   'image-too-small': '图片太小',
   'image-too-large': '图片超过 20 MB',
   'image-unsupported': '仅支持 PNG、JPEG 和 WebP 图片，请检查截图模型配置',
+  'image-privacy-required': '请先确认图片上传说明',
   'no-text': '未识别到可翻译文字',
 }
 

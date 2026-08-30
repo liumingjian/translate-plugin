@@ -36,6 +36,32 @@ iframe 的浮层挂在框架自己身上、卡片会被框架视口夹住，见 
 - puppeteer 默认参数里带 `--disable-extensions`，不用 `ignoreDefaultArgs` 摘掉的话，
   扩展装上了也不会运行 —— 表现为 content script 完全不注入。
 
+浏览器级快捷键和扩展可选权限不经过 renderer，CDP 的键盘与网页权限接口不能覆盖这两个边界。
+macOS 上可用下面的显式平台 harness 验证真实快捷键；它把 `Alt+Shift+S` 直接投递到测试 Chrome
+进程，需要 Xcode Command Line Tools，并可能需要给生成的 helper 辅助功能权限：
+
+```bash
+swiftc scripts/e2e/macos-post-shortcut.swift -o /tmp/translate-plugin-shortcut
+TP_HEADLESS=0 TP_E2E_OS_SHORTCUT=1 \
+TP_E2E_QUARTZ_HELPER=/tmp/translate-plugin-shortcut pnpm e2e:screenshot
+```
+
+真实的 `clipboardRead` 拒绝路径可在 fresh profile 中由 OS Escape 驱动：
+
+```bash
+TP_HEADLESS=0 TP_E2E_OS_PERMISSIONS=1 TP_E2E_OS_PERMISSION_ACTION=deny \
+TP_E2E_CLIPBOARD_PROFILE=/tmp/translate-plugin-permission-deny pnpm e2e:workspace
+```
+
+Chrome 不向 CDP 暴露可选扩展权限的确认气泡，自动化的 Tab/Enter 无法稳定接受。授权、无图片和撤销
+使用真实 Chrome API 的交互验收需在 headed 模式手动点击允许；脚本随后会继续验证自动读取、无图片和
+`chrome.permissions.remove` 撤销，且不会替换产品 API：
+
+```bash
+TP_HEADLESS=0 TP_E2E_MANUAL_PERMISSIONS=1 \
+TP_E2E_CLIPBOARD_PROFILE=/tmp/translate-plugin-permission-grant pnpm e2e:workspace
+```
+
 加载扩展：`chrome://extensions` → 打开开发者模式 → 「加载已解压的扩展程序」→ 选 `dist/`。
 
 首次使用需要在扩展的设置页填入 `api-key`；`base_url` 默认 `https://api.vipsyfw.com`，

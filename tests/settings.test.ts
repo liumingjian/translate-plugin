@@ -38,6 +38,16 @@ describe('settings migration', () => {
   it('uses all defaults when there are no stored settings', () => {
     expect(migrateSettings(undefined)).toEqual(DEFAULT_SETTINGS)
   })
+
+  it.each(['', '   '])('falls back to the default image model for %j', (imageModel) => {
+    expect(migrateSettings({ imageModel }).imageModel).toBe('gpt-5.5')
+  })
+
+  it('trims a configured image model', () => {
+    expect(migrateSettings({ imageModel: '  custom-vision-model  ' }).imageModel).toBe(
+      'custom-vision-model',
+    )
+  })
 })
 
 describe('normalizeBaseUrl', () => {

@@ -32,6 +32,7 @@ const ERRORS: Record<TranslationErrorKind, ErrorSpec> = {
   'image-too-small': { message: '框选区域太小', retry: false, options: false },
   'image-too-large': { message: '图片过大', retry: false, options: false },
   'image-unsupported': { message: '截图模型不支持图片', retry: false, options: true },
+  'image-privacy-required': { message: '请先确认图片上传说明', retry: false, options: false },
   'no-text': { message: '未识别到可翻译文字', retry: true, options: false },
 }
 

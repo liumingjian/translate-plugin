@@ -1,11 +1,12 @@
-import {
-  adjustRectWithKeyboard,
-  moveRect,
-  normalizeRect,
-  resizeRect,
-  validCrop,
-} from '../shared/crop'
+import { IMAGE_PRIVACY_DISCLOSURE } from '../shared/constants'
+import { validCrop } from '../shared/crop'
 import type { CropRect, ResizeHandle, Size } from '../shared/crop'
+import {
+  CROP_HANDLE_LABELS,
+  CROP_HANDLES,
+  CropInteractionController,
+} from '../shared/cropInteraction'
+import type { Point } from '../shared/cropInteraction'
 
 export type ConfirmedScreenshot = {
   imageDataUrl: string
@@ -16,32 +17,15 @@ export type ConfirmedScreenshot = {
 type ScreenshotModeHandlers = {
   onConfirm: (screenshot: ConfirmedScreenshot) => void
   onCancel?: () => void
+  onAcceptPrivacy: () => Promise<boolean>
 }
 
 export type ScreenshotModeState =
+  | 'awaiting-privacy'
   | 'waiting-for-selection'
   | 'adjusting-selection'
   | 'submitting'
   | 'exited'
-
-type Interaction =
-  | { kind: 'create'; start: Point }
-  | { kind: 'move'; start: Point; rect: CropRect }
-  | { kind: 'resize'; start: Point; rect: CropRect; handle: ResizeHandle }
-
-type Point = { x: number; y: number }
-
-const HANDLES: ResizeHandle[] = ['n', 'ne', 'e', 'se', 's', 'sw', 'w', 'nw']
-const HANDLE_LABELS: Record<ResizeHandle, string> = {
-  n: '调整上边界',
-  ne: '调整右上角',
-  e: '调整右边界',
-  se: '调整右下角',
-  s: '调整下边界',
-  sw: '调整左下角',
-  w: '调整左边界',
-  nw: '调整左上角',
-}
 
 const SCREENSHOT_STYLES = `
 :host { all: initial; }
@@ -131,6 +115,25 @@ button:disabled { opacity: .45; cursor: default; }
 button:focus-visible { outline: 3px solid #fff; outline-offset: 2px; }
 .selection .handle { min-height: 12px; padding: 0; }
 .selection .handle:focus-visible { outline: 2px solid #111; box-shadow: 0 0 0 4px #facc15; }
+.privacy {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(420px, calc(100vw - 24px));
+  padding: 20px;
+  border: 1px solid rgba(255, 255, 255, .25);
+  border-radius: 8px;
+  background: #17191d;
+  color: #fff;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, .5);
+  cursor: default;
+}
+.privacy.hidden { display: none; }
+.privacy h2 { margin: 0 0 10px; font-size: 18px; line-height: 1.4; }
+.privacy p { margin: 0 0 16px; font-size: 14px; line-height: 1.6; }
+.privacy-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.surface[data-state="awaiting-privacy"] .toolbar { opacity: .35; }
 @media (max-width: 420px) {
   .toolbar { flex-wrap: wrap; bottom: 8px; }
   .status { width: 100%; flex-basis: 100%; white-space: normal; }
@@ -143,14 +146,17 @@ export class ScreenshotMode {
   private readonly frozenImage = document.createElement('img')
   private readonly selection = document.createElement('div')
   private readonly status = document.createElement('span')
+  private readonly toolbar = document.createElement('div')
   private readonly confirmButton = document.createElement('button')
+  private readonly privacyPanel = document.createElement('section')
+  private readonly privacyAcceptButton = document.createElement('button')
+  private readonly interaction: CropInteractionController
   private previousFocus: HTMLElement | null = null
   private imageDataUrl: string | null = null
-  private rect: CropRect | null = null
-  private interaction: Interaction | null = null
   private state: ScreenshotModeState = 'exited'
 
   constructor(private readonly handlers: ScreenshotModeHandlers) {
+    this.interaction = new CropInteractionController(() => this.render())
     this.host.style.setProperty('all', 'initial')
     this.host.style.setProperty('position', 'fixed')
     this.host.style.setProperty('inset', '0')
@@ -161,6 +167,7 @@ export class ScreenshotMode {
     style.textContent = SCREENSHOT_STYLES
     this.surface.className = 'surface'
     this.surface.setAttribute('role', 'dialog')
+    this.surface.setAttribute('aria-modal', 'true')
     this.surface.setAttribute('aria-label', '截图翻译框选')
     this.surface.tabIndex = -1
     this.frozenImage.className = 'frozen'
@@ -170,20 +177,19 @@ export class ScreenshotMode {
     this.selection.setAttribute('role', 'group')
     this.selection.setAttribute('aria-description', '使用方向键移动框选区域')
     this.selection.tabIndex = 0
-    for (const handle of HANDLES) {
+    for (const handle of CROP_HANDLES) {
       const element = document.createElement('button')
       element.type = 'button'
       element.className = `handle handle-${handle}`
       element.dataset.handle = handle
-      element.setAttribute('aria-label', HANDLE_LABELS[handle])
+      element.setAttribute('aria-label', CROP_HANDLE_LABELS[handle])
       element.setAttribute('aria-description', '使用方向键调整')
       element.addEventListener('keydown', (event) => this.adjustWithKeyboard(event, handle))
       this.selection.append(element)
     }
 
-    const toolbar = document.createElement('div')
-    toolbar.className = 'toolbar'
-    toolbar.addEventListener('pointerdown', (event) => event.stopPropagation())
+    this.toolbar.className = 'toolbar'
+    this.toolbar.addEventListener('pointerdown', (event) => event.stopPropagation())
     this.status.className = 'status'
     this.status.setAttribute('role', 'status')
     this.status.setAttribute('aria-live', 'polite')
@@ -200,8 +206,28 @@ export class ScreenshotMode {
     this.confirmButton.textContent = '确认截图'
     this.confirmButton.disabled = true
     this.confirmButton.addEventListener('click', () => this.confirm())
-    toolbar.append(this.status, selectViewportButton, cancelButton, this.confirmButton)
-    this.surface.append(this.frozenImage, this.selection, toolbar)
+    this.toolbar.append(this.status, selectViewportButton, cancelButton, this.confirmButton)
+
+    this.privacyPanel.className = 'privacy hidden'
+    this.privacyPanel.setAttribute('role', 'document')
+    const privacyTitle = document.createElement('h2')
+    privacyTitle.textContent = '图片上传说明'
+    const privacyText = document.createElement('p')
+    privacyText.textContent = IMAGE_PRIVACY_DISCLOSURE
+    const privacyActions = document.createElement('div')
+    privacyActions.className = 'privacy-actions'
+    const privacyCancelButton = document.createElement('button')
+    privacyCancelButton.type = 'button'
+    privacyCancelButton.textContent = '取消'
+    privacyCancelButton.addEventListener('click', () => this.cancel())
+    this.privacyAcceptButton.type = 'button'
+    this.privacyAcceptButton.className = 'primary'
+    this.privacyAcceptButton.textContent = '同意并继续'
+    this.privacyAcceptButton.addEventListener('click', () => void this.acceptPrivacy())
+    privacyActions.append(privacyCancelButton, this.privacyAcceptButton)
+    this.privacyPanel.append(privacyTitle, privacyText, privacyActions)
+
+    this.surface.append(this.frozenImage, this.selection, this.toolbar, this.privacyPanel)
     root.append(style, this.surface)
 
     this.surface.addEventListener('pointerdown', (event) => this.beginSelection(event))
@@ -221,21 +247,23 @@ export class ScreenshotMode {
     return this.state
   }
 
-  begin(imageDataUrl: string): void {
+  begin(imageDataUrl: string, privacyAccepted = true): void {
     this.cancel()
     this.previousFocus = document.activeElement instanceof HTMLElement
       ? document.activeElement
       : null
     this.imageDataUrl = imageDataUrl
-    this.rect = null
-    this.interaction = null
     this.frozenImage.src = imageDataUrl
     this.selection.classList.remove('visible')
     this.confirmButton.disabled = true
     this.status.textContent = '拖动鼠标创建框选区域'
-    this.setState('waiting-for-selection')
+    this.privacyPanel.classList.toggle('hidden', privacyAccepted)
+    this.setState(privacyAccepted ? 'waiting-for-selection' : 'awaiting-privacy')
     document.documentElement.append(this.host)
-    this.surface.focus({ preventScroll: true })
+    this.interaction.setBounds(this.bounds())
+    this.interaction.setRect(null)
+    if (privacyAccepted) this.surface.focus({ preventScroll: true })
+    else this.privacyAcceptButton.focus({ preventScroll: true })
   }
 
   cancel(): void {
@@ -246,7 +274,8 @@ export class ScreenshotMode {
     this.host.remove()
     this.frozenImage.removeAttribute('src')
     this.imageDataUrl = null
-    this.rect = null
+    this.interaction.setRect(null)
+    this.privacyPanel.classList.add('hidden')
     const restoreFocus = this.previousFocus
     this.previousFocus = null
     if (restoreFocus?.isConnected) restoreFocus.focus({ preventScroll: true })
@@ -254,51 +283,29 @@ export class ScreenshotMode {
   }
 
   private beginSelection(event: PointerEvent): void {
-    if (event.button !== 0 || !this.active || this.state === 'submitting') return
+    if (event.button !== 0 || !this.active ||
+      this.state === 'submitting' || this.state === 'awaiting-privacy') return
     event.preventDefault()
     const point = this.point(event)
     const target = event.target instanceof HTMLElement ? event.target : null
     const handle = target?.dataset.handle as ResizeHandle | undefined
-    if (handle && this.rect) {
-      this.interaction = { kind: 'resize', start: point, rect: { ...this.rect }, handle }
-    } else if (this.rect && target && this.selection.contains(target)) {
-      this.interaction = { kind: 'move', start: point, rect: { ...this.rect } }
-    } else {
-      this.interaction = { kind: 'create', start: point }
-      this.rect = { x: point.x, y: point.y, width: 0, height: 0 }
-    }
+    const action = handle ?? (this.interaction.getRect() && target && this.selection.contains(target)
+      ? 'move'
+      : 'create')
+    this.interaction.setBounds(this.bounds())
+    this.interaction.begin(point, action)
     this.setState('adjusting-selection')
     this.surface.setPointerCapture(event.pointerId)
     this.render()
   }
 
   private updateSelection(event: PointerEvent): void {
-    if (!this.interaction || !this.surface.hasPointerCapture(event.pointerId)) return
-    const point = this.point(event)
-    const dx = point.x - this.interaction.start.x
-    const dy = point.y - this.interaction.start.y
-    switch (this.interaction.kind) {
-      case 'create':
-        this.rect = normalizeRect(this.interaction.start, point)
-        break
-      case 'move':
-        this.rect = moveRect(this.interaction.rect, dx, dy, this.bounds())
-        break
-      case 'resize':
-        this.rect = resizeRect(
-          this.interaction.rect,
-          this.interaction.handle,
-          dx,
-          dy,
-          this.bounds(),
-        )
-        break
-    }
-    this.render()
+    if (!this.surface.hasPointerCapture(event.pointerId)) return
+    this.interaction.setBounds(this.bounds())
+    this.interaction.update(this.point(event))
   }
 
   private endSelection(event: PointerEvent): void {
-    if (!this.interaction) return
     this.updateSelection(event)
     this.endPointer(event.pointerId)
   }
@@ -307,15 +314,11 @@ export class ScreenshotMode {
     if (pointerId !== undefined && this.surface.hasPointerCapture(pointerId)) {
       this.surface.releasePointerCapture(pointerId)
     }
-    this.interaction = null
+    this.interaction.end()
   }
 
   private point(event: PointerEvent): Point {
-    const bounds = this.bounds()
-    return {
-      x: clamp(event.clientX, 0, bounds.width),
-      y: clamp(event.clientY, 0, bounds.height),
-    }
+    return { x: event.clientX, y: event.clientY }
   }
 
   private bounds(): Size {
@@ -323,57 +326,49 @@ export class ScreenshotMode {
   }
 
   private render(): void {
-    if (!this.rect) return
+    const rect = this.interaction.getRect()
+    if (!rect) return
     this.selection.classList.add('visible')
-    this.selection.style.left = `${this.rect.x}px`
-    this.selection.style.top = `${this.rect.y}px`
-    this.selection.style.width = `${this.rect.width}px`
-    this.selection.style.height = `${this.rect.height}px`
-    const valid = validCrop(this.rect)
+    this.selection.style.left = `${rect.x}px`
+    this.selection.style.top = `${rect.y}px`
+    this.selection.style.width = `${rect.width}px`
+    this.selection.style.height = `${rect.height}px`
+    const valid = validCrop(rect)
     this.selection.setAttribute(
       'aria-label',
-      `${Math.round(this.rect.width)} x ${Math.round(this.rect.height)} 的框选区域`,
+      `${Math.round(rect.width)} x ${Math.round(rect.height)} 的框选区域`,
     )
     this.confirmButton.disabled = !valid
     this.status.textContent = valid
-      ? `${Math.round(this.rect.width)} x ${Math.round(this.rect.height)}，点击确认截图`
+      ? `${Math.round(rect.width)} x ${Math.round(rect.height)}，点击确认截图`
       : '框选区域太小，请继续拖动'
   }
 
   private selectViewport(): void {
     const bounds = this.bounds()
     const inset = Math.min(2, bounds.width / 2, bounds.height / 2)
-    this.rect = {
-      x: inset,
-      y: inset,
-      width: Math.max(0, bounds.width - inset * 2),
-      height: Math.max(0, bounds.height - inset * 2),
-    }
+    this.interaction.setBounds(bounds)
+    this.interaction.selectWholeBounds(inset)
     this.setState('adjusting-selection')
     this.render()
     this.selection.focus({ preventScroll: true })
   }
 
   private adjustWithKeyboard(event: KeyboardEvent, handle?: ResizeHandle): void {
-    if (!this.rect || !isArrowKey(event.key)) return
+    if (!this.interaction.getRect() || !isArrowKey(event.key)) return
     event.preventDefault()
     event.stopPropagation()
-    this.rect = adjustRectWithKeyboard(
-      this.rect,
-      event.key,
-      this.bounds(),
-      event.shiftKey ? 10 : 1,
-      handle,
-    )
-    this.render()
+    this.interaction.setBounds(this.bounds())
+    this.interaction.adjust(event.key, event.shiftKey ? 10 : 1, handle)
   }
 
   private confirm(): void {
-    if (this.state !== 'adjusting-selection' || !this.imageDataUrl || !validCrop(this.rect)) return
+    const rect = this.interaction.getRect()
+    if (this.state !== 'adjusting-selection' || !this.imageDataUrl || !validCrop(rect)) return
     this.setState('submitting')
     const confirmed = {
       imageDataUrl: this.imageDataUrl,
-      rect: { ...this.rect },
+      rect,
       viewport: this.bounds(),
     }
     this.cancel()
@@ -381,12 +376,7 @@ export class ScreenshotMode {
   }
 
   private handleDoubleClick(event: MouseEvent): void {
-    if (!this.rect) return
-    if (
-      event.clientX < this.rect.x || event.clientY < this.rect.y ||
-      event.clientX > this.rect.x + this.rect.width ||
-      event.clientY > this.rect.y + this.rect.height
-    ) return
+    if (!this.interaction.contains({ x: event.clientX, y: event.clientY })) return
     event.preventDefault()
     this.confirm()
   }
@@ -403,11 +393,20 @@ export class ScreenshotMode {
   private setState(state: ScreenshotModeState): void {
     this.state = state
     this.surface.dataset.state = state
+    this.toolbar.inert = state === 'awaiting-privacy'
+    this.privacyPanel.inert = state !== 'awaiting-privacy'
   }
-}
 
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value))
+  private async acceptPrivacy(): Promise<void> {
+    if (this.state !== 'awaiting-privacy') return
+    this.privacyAcceptButton.disabled = true
+    const accepted = await this.handlers.onAcceptPrivacy().catch(() => false)
+    this.privacyAcceptButton.disabled = false
+    if (!accepted || this.state !== 'awaiting-privacy') return
+    this.privacyPanel.classList.add('hidden')
+    this.setState('waiting-for-selection')
+    this.surface.focus({ preventScroll: true })
+  }
 }
 
 function isArrowKey(key: string): key is import('../shared/crop').ArrowKey {
