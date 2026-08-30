@@ -105,10 +105,14 @@ privacyAccept.addEventListener('click', () => {
     await saveSettings({ ...current, imagePrivacyAccepted: true })
     privacyAccepted = true
     privacyDialog.close()
+    chooseButton.focus()
   })()
 })
 
-privacyCancel.addEventListener('click', () => privacyDialog.close())
+privacyCancel.addEventListener('click', () => {
+  privacyDialog.close()
+  chooseButton.focus()
+})
 chooseButton.addEventListener('click', openFilePicker)
 reimportButton.addEventListener('click', openFilePicker)
 clearButton.addEventListener('click', clearWorkspace)
@@ -269,6 +273,7 @@ async function loadSource(dataUrl: string, label: string, source: number): Promi
   clearButton.disabled = false
   newSelectionButton.disabled = false
   resetResult('已选择整张图片，按 Enter 开始翻译')
+  imageSurface.focusSelection()
 }
 
 async function startTranslation(): Promise<void> {
@@ -287,6 +292,8 @@ async function startTranslation(): Promise<void> {
   translatedText = ''
   language.textContent = '自动 → 自动'
   result.textContent = ''
+  result.setAttribute('aria-busy', 'true')
+  result.textContent = '正在翻译…'
   result.className = 'result loading'
   resultError.classList.add('hidden')
   resultError.textContent = ''
@@ -344,6 +351,7 @@ function handleEvent(event: TranslateEvent): void {
 function finishTranslation(): void {
   translating = false
   result.classList.remove('loading', 'muted', 'error')
+  result.setAttribute('aria-busy', 'false')
   resultError.classList.add('hidden')
   translateButton.disabled = false
   translateButton.textContent = '重新翻译选中区域'
@@ -354,7 +362,9 @@ function showError(kind: TranslationErrorKind, detail?: string): void {
   translating = false
   lastErrorKind = kind
   result.classList.remove('loading', 'error')
+  result.setAttribute('aria-busy', 'false')
   result.classList.toggle('muted', translatedText === '')
+  if (translatedText === '') result.textContent = ''
   resultError.textContent = detail ? `${ERROR_MESSAGES[kind]}：${detail}` : ERROR_MESSAGES[kind]
   resultError.classList.remove('hidden')
   const reselect = kind === 'no-text'
@@ -364,6 +374,7 @@ function showError(kind: TranslationErrorKind, detail?: string): void {
   if (reselect) imageStatus.textContent = '请重新框选包含文字的区域'
   openOptionsButton.classList.toggle('hidden', kind !== 'no-api-key' && kind !== 'auth' && kind !== 'image-unsupported')
   openOptionsButton.textContent = kind === 'image-unsupported' ? '配置截图模型' : '打开配置页'
+  if (reselect) newSelectionButton.focus()
 }
 
 function clearWorkspace(): void {
@@ -380,6 +391,7 @@ function clearWorkspace(): void {
   clearButton.disabled = true
   newSelectionButton.disabled = true
   resetResult('导入图片后，按 Enter 开始翻译')
+  chooseButton.focus()
 }
 
 function replaceTask(): number {
@@ -400,6 +412,7 @@ function resetResult(message: string): void {
   lastErrorKind = null
   language.textContent = '自动 → 自动'
   result.className = 'result muted'
+  result.setAttribute('aria-busy', 'false')
   result.textContent = message
   resultError.textContent = ''
   resultError.classList.add('hidden')

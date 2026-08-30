@@ -8,6 +8,7 @@ export const SCREENSHOT_CARD_STYLES = `
   --tp-border: rgba(0, 0, 0, 0.08);
   --tp-shadow: 0 8px 32px rgba(0, 0, 0, 0.16);
   --tp-danger: #dc2626;
+  --tp-focus: #175cd3;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -19,6 +20,7 @@ export const SCREENSHOT_CARD_STYLES = `
     --tp-border: rgba(255, 255, 255, 0.1);
     --tp-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
     --tp-danger: #f87171;
+    --tp-focus: #8ab4f8;
   }
 }
 
@@ -34,7 +36,7 @@ export const SCREENSHOT_CARD_STYLES = `
   height: min(460px, calc(100vh - 16px));
   padding: 12px;
   display: grid;
-  grid-template-rows: 28px minmax(0, 132px) auto minmax(44px, 1fr) auto 30px;
+  grid-template-rows: 28px minmax(64px, 132px) auto minmax(44px, 1fr) auto auto;
   gap: 8px;
   border: 1px solid var(--tp-border);
   border-radius: 8px;
@@ -43,7 +45,7 @@ export const SCREENSHOT_CARD_STYLES = `
   box-shadow: var(--tp-shadow);
   font-size: 14px;
   line-height: 1.6;
-  overflow: hidden;
+  overflow-y: auto;
 }
 
 .header {
@@ -82,6 +84,11 @@ export const SCREENSHOT_CARD_STYLES = `
 .close:focus-visible {
   background: var(--tp-block);
   color: var(--tp-fg);
+}
+
+button:focus-visible {
+  outline: 3px solid var(--tp-focus);
+  outline-offset: 2px;
 }
 
 .preview {
@@ -136,6 +143,7 @@ export const SCREENSHOT_CARD_STYLES = `
   align-items: center;
   justify-content: flex-end;
   gap: 6px;
+  flex-wrap: wrap;
 }
 
 .actions button {
@@ -169,5 +177,25 @@ export const SCREENSHOT_CARD_STYLES = `
 
 .hidden {
   display: none !important;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (max-height: 360px) {
+  .card { grid-template-rows: 28px 56px auto minmax(44px, 1fr) auto auto; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dots::after { animation: none; content: '…'; }
 }
 `

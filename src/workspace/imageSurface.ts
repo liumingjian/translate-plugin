@@ -1,4 +1,5 @@
 import {
+  adjustRectWithKeyboard,
   moveRect,
   normalizeRect,
   resizeRect,
@@ -12,6 +13,16 @@ type Interaction =
   | { kind: 'resize'; start: { x: number; y: number }; rect: CropRect; handle: ResizeHandle }
 
 const HANDLES: ResizeHandle[] = ['n', 'ne', 'e', 'se', 's', 'sw', 'w', 'nw']
+const HANDLE_LABELS: Record<ResizeHandle, string> = {
+  n: '调整上边界',
+  ne: '调整右上角',
+  e: '调整右边界',
+  se: '调整右下角',
+  s: '调整下边界',
+  sw: '调整左下角',
+  w: '调整左边界',
+  nw: '调整左上角',
+}
 
 export class ImageSurface {
   private rect: CropRect | null = null
@@ -28,11 +39,15 @@ export class ImageSurface {
     private readonly onChange: (rect: CropRect | null) => void,
     private readonly onConfirm: () => void,
   ) {
+    selection.tabIndex = 0
+    selection.setAttribute('role', 'group')
     for (const handle of HANDLES) {
-      const element = document.createElement('span')
+      const element = document.createElement('button')
+      element.type = 'button'
       element.className = `crop-handle crop-handle-${handle}`
       element.dataset.handle = handle
-      element.setAttribute('aria-hidden', 'true')
+      element.setAttribute('aria-label', HANDLE_LABELS[handle])
+      element.addEventListener('keydown', (event) => this.adjustWithKeyboard(event, handle))
       selection.append(element)
     }
 
@@ -42,6 +57,7 @@ export class ImageSurface {
     frame.addEventListener('pointercancel', this.handlePointerUp)
     frame.addEventListener('dblclick', this.handleDoubleClick)
     newSelectionButton.addEventListener('click', () => this.beginNewSelection())
+    selection.addEventListener('keydown', (event) => this.adjustWithKeyboard(event))
 
     this.resizeObserver = new ResizeObserver(() => this.syncBounds())
     this.resizeObserver.observe(image)
@@ -72,11 +88,21 @@ export class ImageSurface {
     return { ...this.bounds }
   }
 
+  focusSelection(): void {
+    this.selection.focus({ preventScroll: true })
+  }
+
   private beginNewSelection(): void {
     this.interaction = null
-    this.rect = null
+    this.rect = {
+      x: this.bounds.width / 4,
+      y: this.bounds.height / 4,
+      width: this.bounds.width / 2,
+      height: this.bounds.height / 2,
+    }
     this.render()
-    this.onChange(null)
+    this.onChange(this.getSelection())
+    this.focusSelection()
   }
 
   private readonly handlePointerDown = (event: PointerEvent): void => {
@@ -153,6 +179,21 @@ export class ImageSurface {
     this.render()
   }
 
+  private adjustWithKeyboard(event: KeyboardEvent, handle?: ResizeHandle): void {
+    if (!this.rect || !isArrowKey(event.key)) return
+    event.preventDefault()
+    event.stopPropagation()
+    this.rect = adjustRectWithKeyboard(
+      this.rect,
+      event.key,
+      this.bounds,
+      event.shiftKey ? 10 : 1,
+      handle,
+    )
+    this.render()
+    this.onChange(this.getSelection())
+  }
+
   private readBounds(): Size {
     const box = this.image.getBoundingClientRect()
     return { width: box.width, height: box.height }
@@ -186,6 +227,10 @@ export class ImageSurface {
     this.selection.setAttribute('aria-label', whole ? '已选择整张图片' : '图片框选区域')
     this.label.textContent = whole ? '整张图片' : '框选区域'
   }
+}
+
+function isArrowKey(key: string): key is import('../shared/crop').ArrowKey {
+  return key === 'ArrowLeft' || key === 'ArrowRight' || key === 'ArrowUp' || key === 'ArrowDown'
 }
 
 function clamp(value: number, min: number, max: number): number {

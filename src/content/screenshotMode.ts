@@ -1,4 +1,5 @@
 import {
+  adjustRectWithKeyboard,
   moveRect,
   normalizeRect,
   resizeRect,
@@ -31,6 +32,16 @@ type Interaction =
 type Point = { x: number; y: number }
 
 const HANDLES: ResizeHandle[] = ['n', 'ne', 'e', 'se', 's', 'sw', 'w', 'nw']
+const HANDLE_LABELS: Record<ResizeHandle, string> = {
+  n: '调整上边界',
+  ne: '调整右上角',
+  e: '调整右边界',
+  se: '调整右下角',
+  s: '调整下边界',
+  sw: '调整左下角',
+  w: '调整左边界',
+  nw: '调整左上角',
+}
 
 const SCREENSHOT_STYLES = `
 :host { all: initial; }
@@ -61,8 +72,10 @@ const SCREENSHOT_STYLES = `
   background: rgba(79, 140, 255, .08);
   box-shadow: 0 0 0 9999px rgba(0, 0, 0, .45);
   cursor: move;
+  outline: none;
 }
 .selection.visible { display: block; }
+.selection:focus-visible { border-color: #facc15; outline: 2px solid #111; outline-offset: 3px; }
 .handle {
   position: absolute;
   width: 12px;
@@ -70,6 +83,7 @@ const SCREENSHOT_STYLES = `
   border: 2px solid #2563eb;
   border-radius: 2px;
   background: #fff;
+  padding: 0;
 }
 .handle-n { top: -7px; left: calc(50% - 6px); cursor: ns-resize; }
 .handle-ne { top: -7px; right: -7px; cursor: nesw-resize; }
@@ -84,7 +98,7 @@ const SCREENSHOT_STYLES = `
   left: 50%;
   bottom: 24px;
   transform: translateX(-50%);
-  min-width: 260px;
+  width: min(420px, calc(100vw - 16px));
   padding: 10px;
   display: flex;
   align-items: center;
@@ -114,6 +128,13 @@ button {
 }
 button.primary { border-color: transparent; background: #2563eb; }
 button:disabled { opacity: .45; cursor: default; }
+button:focus-visible { outline: 3px solid #fff; outline-offset: 2px; }
+.selection .handle { min-height: 12px; padding: 0; }
+.selection .handle:focus-visible { outline: 2px solid #111; box-shadow: 0 0 0 4px #facc15; }
+@media (max-width: 420px) {
+  .toolbar { flex-wrap: wrap; bottom: 8px; }
+  .status { width: 100%; flex-basis: 100%; white-space: normal; }
+}
 `
 
 export class ScreenshotMode {
@@ -123,6 +144,7 @@ export class ScreenshotMode {
   private readonly selection = document.createElement('div')
   private readonly status = document.createElement('span')
   private readonly confirmButton = document.createElement('button')
+  private previousFocus: HTMLElement | null = null
   private imageDataUrl: string | null = null
   private rect: CropRect | null = null
   private interaction: Interaction | null = null
@@ -145,12 +167,17 @@ export class ScreenshotMode {
     this.frozenImage.alt = '当前页面的冻结画面'
     this.frozenImage.draggable = false
     this.selection.className = 'selection'
-    this.selection.setAttribute('aria-label', '框选区域')
+    this.selection.setAttribute('role', 'group')
+    this.selection.setAttribute('aria-description', '使用方向键移动框选区域')
+    this.selection.tabIndex = 0
     for (const handle of HANDLES) {
-      const element = document.createElement('span')
+      const element = document.createElement('button')
+      element.type = 'button'
       element.className = `handle handle-${handle}`
       element.dataset.handle = handle
-      element.setAttribute('aria-hidden', 'true')
+      element.setAttribute('aria-label', HANDLE_LABELS[handle])
+      element.setAttribute('aria-description', '使用方向键调整')
+      element.addEventListener('keydown', (event) => this.adjustWithKeyboard(event, handle))
       this.selection.append(element)
     }
 
@@ -159,6 +186,11 @@ export class ScreenshotMode {
     toolbar.addEventListener('pointerdown', (event) => event.stopPropagation())
     this.status.className = 'status'
     this.status.setAttribute('role', 'status')
+    this.status.setAttribute('aria-live', 'polite')
+    const selectViewportButton = document.createElement('button')
+    selectViewportButton.type = 'button'
+    selectViewportButton.textContent = '选择可见区域'
+    selectViewportButton.addEventListener('click', () => this.selectViewport())
     const cancelButton = document.createElement('button')
     cancelButton.type = 'button'
     cancelButton.textContent = '取消'
@@ -168,7 +200,7 @@ export class ScreenshotMode {
     this.confirmButton.textContent = '确认截图'
     this.confirmButton.disabled = true
     this.confirmButton.addEventListener('click', () => this.confirm())
-    toolbar.append(this.status, cancelButton, this.confirmButton)
+    toolbar.append(this.status, selectViewportButton, cancelButton, this.confirmButton)
     this.surface.append(this.frozenImage, this.selection, toolbar)
     root.append(style, this.surface)
 
@@ -177,6 +209,7 @@ export class ScreenshotMode {
     this.surface.addEventListener('pointerup', (event) => this.endSelection(event))
     this.surface.addEventListener('pointercancel', (event) => this.endPointer(event.pointerId))
     this.surface.addEventListener('dblclick', (event) => this.handleDoubleClick(event))
+    this.selection.addEventListener('keydown', (event) => this.adjustWithKeyboard(event))
     window.addEventListener('keydown', (event) => this.handleKeydown(event), true)
   }
 
@@ -190,6 +223,9 @@ export class ScreenshotMode {
 
   begin(imageDataUrl: string): void {
     this.cancel()
+    this.previousFocus = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null
     this.imageDataUrl = imageDataUrl
     this.rect = null
     this.interaction = null
@@ -211,6 +247,9 @@ export class ScreenshotMode {
     this.frozenImage.removeAttribute('src')
     this.imageDataUrl = null
     this.rect = null
+    const restoreFocus = this.previousFocus
+    this.previousFocus = null
+    if (restoreFocus?.isConnected) restoreFocus.focus({ preventScroll: true })
     if (notify) this.handlers.onCancel?.()
   }
 
@@ -291,10 +330,42 @@ export class ScreenshotMode {
     this.selection.style.width = `${this.rect.width}px`
     this.selection.style.height = `${this.rect.height}px`
     const valid = validCrop(this.rect)
+    this.selection.setAttribute(
+      'aria-label',
+      `${Math.round(this.rect.width)} x ${Math.round(this.rect.height)} 的框选区域`,
+    )
     this.confirmButton.disabled = !valid
     this.status.textContent = valid
       ? `${Math.round(this.rect.width)} x ${Math.round(this.rect.height)}，点击确认截图`
       : '框选区域太小，请继续拖动'
+  }
+
+  private selectViewport(): void {
+    const bounds = this.bounds()
+    const inset = Math.min(2, bounds.width / 2, bounds.height / 2)
+    this.rect = {
+      x: inset,
+      y: inset,
+      width: Math.max(0, bounds.width - inset * 2),
+      height: Math.max(0, bounds.height - inset * 2),
+    }
+    this.setState('adjusting-selection')
+    this.render()
+    this.selection.focus({ preventScroll: true })
+  }
+
+  private adjustWithKeyboard(event: KeyboardEvent, handle?: ResizeHandle): void {
+    if (!this.rect || !isArrowKey(event.key)) return
+    event.preventDefault()
+    event.stopPropagation()
+    this.rect = adjustRectWithKeyboard(
+      this.rect,
+      event.key,
+      this.bounds(),
+      event.shiftKey ? 10 : 1,
+      handle,
+    )
+    this.render()
   }
 
   private confirm(): void {
@@ -322,6 +393,7 @@ export class ScreenshotMode {
 
   private handleKeydown(event: KeyboardEvent): void {
     if (!this.active || (event.key !== 'Escape' && event.key !== 'Enter')) return
+    if (event.key === 'Enter' && event.composedPath()[0] instanceof HTMLButtonElement) return
     event.preventDefault()
     event.stopImmediatePropagation()
     if (event.key === 'Escape') this.cancel()
@@ -336,4 +408,8 @@ export class ScreenshotMode {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value))
+}
+
+function isArrowKey(key: string): key is import('../shared/crop').ArrowKey {
+  return key === 'ArrowLeft' || key === 'ArrowRight' || key === 'ArrowUp' || key === 'ArrowDown'
 }

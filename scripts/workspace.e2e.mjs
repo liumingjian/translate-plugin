@@ -150,11 +150,26 @@ try {
     elements.map((element) => element.textContent),
   )
   assert.deepEqual(entries, ['截图翻译', '导入图片', '配置页'])
+  const popupTree = await popup.accessibility.snapshot()
+  assert.deepEqual(
+    collectAccessibleButtons(popupTree),
+    ['截图翻译 Alt+Shift+S', '导入图片 打开图片翻译工作区', '配置页 翻译服务与模型'],
+  )
+  await popup.emulateMediaFeatures([{ name: 'prefers-color-scheme', value: 'dark' }])
+  assert((await contrastFor(popup, 'body')) >= 4.5, 'dark popup text must keep readable contrast')
+  await popup.keyboard.press('Tab')
+  assert.equal(await popup.evaluate(() => document.activeElement?.id), 'screenshot')
+  await popup.keyboard.press('Tab')
+  assert.equal(await popup.evaluate(() => document.activeElement?.id), 'import')
 
   const beforeImport = new Set(browser.targets())
-  await popup.click('#import')
+  await popup.keyboard.press('Enter')
   const workspace = await waitForWorkspace(beforeImport)
+  await workspace.setViewport({ width: 360, height: 640, deviceScaleFactor: 2 })
+  await workspace.emulateMediaFeatures([{ name: 'prefers-color-scheme', value: 'dark' }])
   await workspace.waitForFunction(() => document.querySelector('dialog')?.open)
+  assert.equal(await hasHorizontalOverflow(workspace), false)
+  assert((await contrastFor(workspace, 'body')) >= 4.5, 'dark workspace text must keep readable contrast')
   const disclosure = await workspace.$eval('#privacyDialog', (dialog) => dialog.textContent)
   assert.match(disclosure, /发送到你配置的翻译服务/)
   await workspace.click('#privacyAccept')
@@ -167,11 +182,27 @@ try {
     const image = document.querySelector('#sourceImage')
     return image instanceof HTMLImageElement && image.naturalWidth > 0
   })
+  await workspace.waitForFunction(() => document.activeElement?.id === 'cropSelection')
   assert.equal(
     await workspace.$eval('.full-selection', (selection) => selection.getAttribute('aria-label')),
     '已选择整张图片',
   )
   assert.equal(await workspace.$$eval('.crop-handle', (handles) => handles.length), 8)
+  assert.equal(await workspace.evaluate(() => document.activeElement?.id), 'cropSelection')
+  const initialKeyboardSelection = await elementBox(workspace, '#cropSelection')
+  await workspace.keyboard.press('Tab')
+  assert.equal(
+    await workspace.evaluate(() => document.activeElement?.getAttribute('aria-label')),
+    '调整上边界',
+  )
+  await pressShiftArrow(workspace, 'ArrowDown')
+  assert.equal((await elementBox(workspace, '#cropSelection')).top, initialKeyboardSelection.top + 10)
+  await pressShiftArrow(workspace, 'ArrowUp')
+  assert.equal((await elementBox(workspace, '#cropSelection')).top, initialKeyboardSelection.top)
+  assert.equal(requests.length, 0, 'keyboard crop adjustment must not submit a request')
+  assert.equal(await hasHorizontalOverflow(workspace), false)
+  await workspace.emulateMediaFeatures([{ name: 'prefers-color-scheme', value: 'light' }])
+  await workspace.setViewport({ width: 900, height: 700, deviceScaleFactor: 1 })
 
   await workspace.click('#newSelection')
   const frame = await workspace.$eval('.image-frame', (element) => {
@@ -603,10 +634,12 @@ try {
       recovery: ['network', 'partial', 'no-text', 'image-model', 'retry', 'copy', 'reimport', 'clear'],
       cropPixels: `${encodedCrop.width}x${encodedCrop.height}`,
       explicitSubmitMethods: ['button', 'double-click', 'Enter'],
+      keyboardCrop: ['focus', 'nudge', 'resize'],
       imageImports: ['file', 'drop', 'manual-paste', 'auto-read'],
       clipboardDenial: true,
       clipboardRevocation: true,
       restrictedPageFallback: true,
+      accessibility: ['popup-names', 'dark', 'high-dpr', 'narrow-viewport'],
     }),
   )
 } finally {
@@ -620,6 +653,12 @@ async function drag(page, fromX, fromY, toX, toY) {
   await page.mouse.down()
   await page.mouse.move(toX, toY, { steps: 6 })
   await page.mouse.up()
+}
+
+async function pressShiftArrow(page, key) {
+  await page.keyboard.down('Shift')
+  await page.keyboard.press(key)
+  await page.keyboard.up('Shift')
 }
 
 async function elementBox(page, selector) {
@@ -639,4 +678,31 @@ async function waitForRequestCount(count) {
 
 function imageUrlOf(request) {
   return request.messages.at(-1).content.find((item) => item.type === 'image_url').image_url.url
+}
+
+function collectAccessibleButtons(node) {
+  if (!node) return []
+  const own = node.role === 'button' ? [node.name] : []
+  return own.concat(...(node.children ?? []).map(collectAccessibleButtons))
+}
+
+async function hasHorizontalOverflow(page) {
+  return page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)
+}
+
+async function contrastFor(page, selector) {
+  return page.$eval(selector, (element) => {
+    const style = getComputedStyle(element)
+    const rgb = (value) => value.match(/[\d.]+/g).slice(0, 3).map(Number)
+    const luminance = (value) => {
+      const channels = rgb(value).map((channel) => {
+        const normalized = channel / 255
+        return normalized <= .04045 ? normalized / 12.92 : ((normalized + .055) / 1.055) ** 2.4
+      })
+      return .2126 * channels[0] + .7152 * channels[1] + .0722 * channels[2]
+    }
+    const foreground = luminance(style.color)
+    const background = luminance(style.backgroundColor)
+    return (Math.max(foreground, background) + .05) / (Math.min(foreground, background) + .05)
+  })
 }

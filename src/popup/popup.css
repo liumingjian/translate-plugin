@@ -6,6 +6,7 @@
   --border: #d9dde5;
   --hover: #f3f5f8;
   --accent: #1769e0;
+  --primary-bg: #1769e0;
   --danger: #c62828;
 }
 
@@ -17,6 +18,7 @@
     --border: #45484f;
     --hover: #2b2d31;
     --accent: #76a7ff;
+    --primary-bg: #356ac3;
     --danger: #ff8a80;
   }
 }
@@ -64,7 +66,7 @@ main { padding: 8px; }
   font-size: 18px;
 }
 
-.primary .icon { background: var(--accent); border-color: var(--accent); color: #fff; }
+.primary .icon { background: var(--primary-bg); border-color: var(--primary-bg); color: #fff; }
 strong, small { display: block; letter-spacing: 0; }
 strong { font-size: 13px; }
 small { color: var(--muted); font-size: 11px; margin-top: 2px; }

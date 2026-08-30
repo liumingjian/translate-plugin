@@ -40,12 +40,13 @@
         <div id="imageStage" class="image-stage hidden">
           <div class="image-frame">
             <img id="sourceImage" alt="待翻译图片" draggable="false" />
-            <div id="cropSelection" class="crop-selection full-selection" aria-label="已选择整张图片">
+            <div id="cropSelection" class="crop-selection full-selection" aria-label="已选择整张图片" aria-describedby="crop-help">
               <span id="selectionLabel" class="selection-label">整张图片</span>
             </div>
           </div>
         </div>
         <input id="fileInput" type="file" accept="image/png,image/jpeg,image/webp" hidden />
+        <span id="crop-help" class="visually-hidden">方向键移动框选区域；切换到边界控制点后，用方向键调整大小。</span>
         <p id="imageStatus" class="inline-status" role="status"></p>
         <button id="translate" type="button" class="primary translate" disabled>翻译选中区域</button>
       </section>
@@ -53,9 +54,9 @@
       <section class="result-pane" aria-labelledby="result-heading">
         <div class="pane-heading">
           <h2 id="result-heading">译文</h2>
-          <span id="language" class="badge">自动 → 自动</span>
+          <span id="language" class="badge" aria-label="翻译语言方向">自动 → 自动</span>
         </div>
-        <div id="result" class="result muted" aria-live="polite">导入图片后，按 Enter 开始翻译</div>
+        <div id="result" class="result muted" role="status" aria-live="polite">导入图片后，按 Enter 开始翻译</div>
         <p id="resultError" class="result-error hidden" role="alert"></p>
         <div class="result-actions">
           <button id="openOptions" type="button" class="secondary hidden">打开配置页</button>

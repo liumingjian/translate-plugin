@@ -18,9 +18,10 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#f7f7f7;fon
 #red{position:fixed;left:80px;top:120px;width:300px;height:220px;background:rgb(220,30,30)}
 #blue{position:fixed;left:430px;top:120px;width:300px;height:220px;background:rgb(30,80,220)}
 #ticker{position:fixed;left:80px;top:40px;width:180px;height:48px;color:#fff;background:#111}
+#focusTarget{position:fixed;left:4px;top:4px}
 iframe{position:fixed;left:80px;top:390px;width:420px;height:120px;border:1px solid #999}
 </style></head><body>
-<div id="ticker">live</div><div id="red"></div><div id="blue"></div>
+<button id="focusTarget" type="button">页面焦点目标</button><div id="ticker">live</div><div id="red"></div><div id="blue"></div>
 <iframe srcdoc="<!doctype html><p id='frameText'>Text selection inside an iframe</p>"></iframe>
 <script>
 let tick=0;setInterval(()=>{tick++;ticker.dataset.tick=String(tick);ticker.style.background=tick%2?'rgb(10,170,70)':'rgb(140,30,180)'},50)
@@ -132,6 +133,7 @@ try {
   await page.bringToFront()
   await installPageHelpers(page)
   await new Promise((resolve) => setTimeout(resolve, 1_500))
+  await page.focus('#focusTarget')
 
   // Chrome 自己报告默认快捷键已注册；菜单入口随后走完整的真实截图链路。
   // CDP 键盘事件进入渲染进程时已经错过浏览器级 accelerator 分发阶段。
@@ -140,6 +142,7 @@ try {
   assert.equal(await countFrameScreenshotModes(page), 0)
   assert.equal(await screenshotState(page), 'waiting-for-selection')
   assert.equal(await screenshotHandleCount(page), 8)
+  assert.equal(await screenshotModeFocusedName(page), '截图翻译框选')
   const firstFrozenSource = await frozenSource(page)
   const tickBefore = await page.$eval('#ticker', (element) => element.dataset.tick)
   await new Promise((resolve) => setTimeout(resolve, 180))
@@ -223,6 +226,7 @@ try {
   assertCardInViewport(firstStream.rect, { width: 900, height: 700 })
   await page.waitForFunction(() => window.__findTranslationCard()?.result === '第一段第二段')
   await page.waitForFunction(() => window.__findTranslationCard()?.copyVisible)
+  assert.equal(await screenshotCardFocusedName(page), '关闭截图翻译')
 
   await waitForRequestCount(1)
   assert.equal(requests.length, 1, 'confirming twice must still create one request')
@@ -268,9 +272,21 @@ try {
 
   await clickCardButton(page, '关闭截图翻译')
   await page.waitForFunction(() => !window.__findTranslationCard())
+  assert.equal(await page.evaluate(() => document.activeElement?.id), 'focusTarget')
 
   await beginScreenshot(browser, worker, extensionOrigin, page)
-  await drag(page, 120, 160, 260, 280)
+  await page.keyboard.press('Tab')
+  assert.equal(await screenshotModeFocusedName(page), '选择可见区域')
+  await page.keyboard.press('Enter')
+  const keyboardSelection = await screenshotSelection(page)
+  await page.keyboard.press('ArrowLeft')
+  assert.equal((await screenshotSelection(page)).left, keyboardSelection.left - 1)
+  await page.keyboard.press('Tab')
+  assert.equal(await screenshotModeFocusedName(page), '调整上边界')
+  await pressShiftArrow(page, 'ArrowDown')
+  assert.equal((await screenshotSelection(page)).top, keyboardSelection.top + 10)
+  for (let index = 0; index < 10; index++) await page.keyboard.press('Tab')
+  assert.equal(await screenshotModeFocusedName(page), '确认截图')
   await page.keyboard.press('Enter')
   await page.waitForFunction(() => !window.__findScreenshotDialog())
   await waitForRequestCount(2)
@@ -323,6 +339,24 @@ try {
     'page zoom and high DPR must map the confirmed display pixels to the frozen bitmap',
   )
   await pageCdp.send('Emulation.setPageScaleFactor', { pageScaleFactor: 1 })
+  await page.waitForFunction(() => window.__findTranslationCard()?.result === '第一段第二段')
+  await page.emulateMediaFeatures([{ name: 'prefers-color-scheme', value: 'dark' }])
+  await page.setViewport({ width: 320, height: 480, deviceScaleFactor: 2 })
+  await page.waitForFunction(() => {
+    const card = window.__findScreenshotCard()
+    if (!card) return false
+    const rect = card.getBoundingClientRect()
+    return rect.left >= 8 && rect.top >= 8 &&
+      rect.right <= window.innerWidth - 8 && rect.bottom <= window.innerHeight - 8
+  })
+  const narrowCard = await screenshotCard(page)
+  assertCardInViewport(narrowCard.rect, { width: 320, height: 480 })
+  assert.equal(await screenshotCardHasOverlappingActions(page), false)
+  assert((await screenshotCardContrast(page)) >= 4.5, 'dark card text must keep readable contrast')
+  await page.keyboard.press('Escape')
+  await page.waitForFunction(() => !window.__findTranslationCard())
+  await page.emulateMediaFeatures([{ name: 'prefers-color-scheme', value: 'light' }])
+  await page.setViewport({ width: 900, height: 700, deviceScaleFactor: 2 })
 
   for (const [mode, errorText] of [
     ['network', '请求失败'],
@@ -439,6 +473,7 @@ try {
     frozenTopFrameOnly: true,
     restoredLivePage: true,
     selectionInteractions: ['move', 'n', 'ne', 'e', 'se', 's', 'sw', 'w', 'nw'],
+    keyboardSelection: ['visible-region', 'nudge', 'resize'],
     confirmationPaths: ['button', 'Enter', 'double-click'],
     cancellationPaths: ['Escape', 'button'],
     confirmedPixels: [`${pixels.width}x${pixels.height}`, `${scaledPixels.width}x${scaledPixels.height}@2x`],
@@ -446,6 +481,7 @@ try {
     card: ['edge-flipped', 'viewport-constrained', 'dragged', 'persistent', 'copied', 'closed'],
     recovery: ['network', 'unavailable', 'empty', 'partial', 'no-text', 'image-model', 'auth'],
     iframeSelectionPreserved: true,
+    accessibility: ['focus-enter', 'focus-restore', 'dark', 'narrow-viewport'],
   }))
 } finally {
   await browser.close()
@@ -563,9 +599,23 @@ async function screenshotStatus(page) {
 
 async function screenshotSelection(page) {
   return page.evaluate(() => {
-    const selection = window.__findScreenshotDialog()?.querySelector('[aria-label="框选区域"]')
+    const selection = window.__findScreenshotDialog()?.querySelector('[role="group"]')
     const rect = selection.getBoundingClientRect()
     return { left: rect.left, top: rect.top, width: rect.width, height: rect.height }
+  })
+}
+
+async function screenshotModeFocusedName(page) {
+  return page.evaluate(() => {
+    const active = window.__findScreenshotDialog()?.getRootNode().activeElement
+    return active?.getAttribute('aria-label') || active?.textContent?.trim()
+  })
+}
+
+async function screenshotCardFocusedName(page) {
+  return page.evaluate(() => {
+    const active = window.__findScreenshotCard()?.getRootNode().activeElement
+    return active?.getAttribute('aria-label') || active?.textContent?.trim()
   })
 }
 
@@ -600,6 +650,12 @@ async function doubleClick(page, x, y) {
   await page.mouse.up({ clickCount: 1 })
   await page.mouse.down({ clickCount: 2 })
   await page.mouse.up({ clickCount: 2 })
+}
+
+async function pressShiftArrow(page, key) {
+  await page.keyboard.down('Shift')
+  await page.keyboard.press(key)
+  await page.keyboard.up('Shift')
 }
 
 function assertHandleMoved(handle, before, after) {
@@ -651,6 +707,36 @@ async function clickCardButton(page, label) {
     return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
   }, label)
   await page.mouse.click(position.x, position.y)
+}
+
+async function screenshotCardHasOverlappingActions(page) {
+  return page.evaluate(() => {
+    const buttons = [...window.__findScreenshotCard().querySelectorAll('.actions button')]
+      .filter((button) => button.getBoundingClientRect().height > 0)
+      .map((button) => button.getBoundingClientRect())
+    return buttons.some((rect, index) => buttons.slice(index + 1).some((other) =>
+      rect.left < other.right && rect.right > other.left &&
+      rect.top < other.bottom && rect.bottom > other.top,
+    ))
+  })
+}
+
+async function screenshotCardContrast(page) {
+  return page.evaluate(() => {
+    const card = window.__findScreenshotCard()
+    const style = getComputedStyle(card)
+    const rgb = (value) => value.match(/[\d.]+/g).slice(0, 3).map(Number)
+    const luminance = (value) => {
+      const channels = rgb(value).map((channel) => {
+        const normalized = channel / 255
+        return normalized <= .04045 ? normalized / 12.92 : ((normalized + .055) / 1.055) ** 2.4
+      })
+      return .2126 * channels[0] + .7152 * channels[1] + .0722 * channels[2]
+    }
+    const foreground = luminance(style.color)
+    const background = luminance(style.backgroundColor)
+    return (Math.max(foreground, background) + .05) / (Math.min(foreground, background) + .05)
+  })
 }
 
 function cardNearRect(card, anchor) {

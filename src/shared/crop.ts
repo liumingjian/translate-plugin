@@ -3,6 +3,7 @@ import { MIN_IMAGE_SELECTION_SIZE } from './constants'
 export type CropRect = { x: number; y: number; width: number; height: number }
 export type Size = { width: number; height: number }
 export type ResizeHandle = 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w' | 'nw'
+export type ArrowKey = 'ArrowLeft' | 'ArrowRight' | 'ArrowUp' | 'ArrowDown'
 
 export function normalizeRect(start: { x: number; y: number }, end: { x: number; y: number }): CropRect {
   return {
@@ -26,6 +27,25 @@ export function clampRect(rect: CropRect, bounds: Size): CropRect {
 
 export function moveRect(rect: CropRect, dx: number, dy: number, bounds: Size): CropRect {
   return clampRect({ ...rect, x: rect.x + dx, y: rect.y + dy }, bounds)
+}
+
+export function adjustRectWithKeyboard(
+  rect: CropRect,
+  key: ArrowKey,
+  bounds: Size,
+  step: number,
+  handle?: ResizeHandle,
+): CropRect {
+  const dx = key === 'ArrowLeft' ? -step : key === 'ArrowRight' ? step : 0
+  const dy = key === 'ArrowUp' ? -step : key === 'ArrowDown' ? step : 0
+  if (!handle) return moveRect(rect, dx, dy, bounds)
+  return resizeRect(
+    rect,
+    handle,
+    handle.includes('e') || handle.includes('w') ? dx : 0,
+    handle.includes('n') || handle.includes('s') ? dy : 0,
+    bounds,
+  )
 }
 
 export function resizeRect(

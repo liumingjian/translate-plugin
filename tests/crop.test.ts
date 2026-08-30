@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  adjustRectWithKeyboard,
   clampRect,
   moveRect,
   normalizeRect,
@@ -33,6 +34,22 @@ describe('crop geometry', () => {
       width: 40,
       height: 30,
     })
+  })
+
+  it('moves and resizes a rectangle with keyboard arrow input', () => {
+    const rect = { x: 20, y: 10, width: 40, height: 30 }
+    const bounds = { width: 100, height: 80 }
+
+    expect(adjustRectWithKeyboard(rect, 'ArrowRight', bounds, 10)).toEqual({
+      x: 30, y: 10, width: 40, height: 30,
+    })
+    expect(adjustRectWithKeyboard(rect, 'ArrowLeft', bounds, 10, 'w')).toEqual({
+      x: 10, y: 10, width: 50, height: 30,
+    })
+    expect(adjustRectWithKeyboard(rect, 'ArrowDown', bounds, 10, 'nw')).toEqual({
+      x: 20, y: 20, width: 40, height: 20,
+    })
+    expect(adjustRectWithKeyboard(rect, 'ArrowRight', bounds, 10, 'n')).toEqual(rect)
   })
 
   it('keeps a moved rectangle unchanged when the pointer travels beyond every edge', () => {

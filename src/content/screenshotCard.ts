@@ -37,11 +37,14 @@ export class ScreenshotCard {
   private readonly retryButton = document.createElement('button')
   private readonly reselectButton = document.createElement('button')
   private readonly optionsButton = document.createElement('button')
+  private readonly closeButton = document.createElement('button')
+  private readonly announcement = document.createElement('div')
   private anchor: Rect | null = null
   private dragged = false
   private dragPointerId: number | null = null
   private dragOffset = { x: 0, y: 0 }
   private flashTimer: number | null = null
+  private previousFocus: HTMLElement | null = null
 
   constructor(private readonly handlers: ScreenshotCardHandlers) {
     this.host.style.setProperty('all', 'initial')
@@ -70,8 +73,14 @@ export class ScreenshotCard {
     this.preview.src = imageDataUrl
     this.setLang(undefined, undefined)
     this.setLoading()
-    if (!this.visible) document.documentElement.append(this.host)
+    if (!this.visible) {
+      this.previousFocus = document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null
+      document.documentElement.append(this.host)
+    }
     this.reposition()
+    this.closeButton.focus({ preventScroll: true })
   }
 
   close(): void {
@@ -80,6 +89,9 @@ export class ScreenshotCard {
     this.anchor = null
     this.preview.removeAttribute('src')
     this.endDrag()
+    const restoreFocus = this.previousFocus
+    this.previousFocus = null
+    if (restoreFocus?.isConnected) restoreFocus.focus({ preventScroll: true })
     this.handlers.onClose()
   }
 
@@ -90,6 +102,12 @@ export class ScreenshotCard {
   }
 
   setLoading(): void {
+    const root = this.card.getRootNode()
+    const focused = root instanceof ShadowRoot ? root.activeElement : null
+    if (
+      focused === this.copyButton || focused === this.retryButton ||
+      focused === this.reselectButton || focused === this.optionsButton
+    ) this.closeButton.focus({ preventScroll: true })
     this.result.className = 'result dots'
     this.result.textContent = ''
     this.error.classList.add('hidden')
@@ -97,6 +115,8 @@ export class ScreenshotCard {
     this.retryButton.classList.add('hidden')
     this.reselectButton.classList.add('hidden')
     this.optionsButton.classList.add('hidden')
+    this.card.setAttribute('aria-busy', 'true')
+    this.announce('正在翻译截图')
   }
 
   appendDelta(text: string): void {
@@ -108,6 +128,8 @@ export class ScreenshotCard {
     this.result.classList.remove('dots')
     this.copyButton.classList.remove('hidden')
     this.reselectButton.classList.remove('hidden')
+    this.card.setAttribute('aria-busy', 'false')
+    this.announce('截图翻译完成')
   }
 
   showError(kind: TranslationErrorKind, detail?: string): void {
@@ -125,26 +147,28 @@ export class ScreenshotCard {
     this.optionsButton.classList.toggle('hidden', !settingsError)
     this.optionsButton.textContent = kind === 'image-unsupported' ? '配置截图模型' : '打开配置页'
     this.optionsButton.dataset.imageModel = String(kind === 'image-unsupported')
+    this.card.setAttribute('aria-busy', 'false')
   }
 
   private buildCard(): HTMLElement {
     this.card.className = 'card'
     this.card.setAttribute('role', 'dialog')
     this.card.setAttribute('aria-label', '截图翻译结果')
+    this.card.setAttribute('aria-labelledby', 'tp-screenshot-card-title')
 
     this.header.className = 'header'
     const title = document.createElement('span')
     title.className = 'title'
+    title.id = 'tp-screenshot-card-title'
     title.textContent = '截图翻译'
-    const closeButton = document.createElement('button')
-    closeButton.className = 'close'
-    closeButton.type = 'button'
-    closeButton.title = '关闭截图翻译'
-    closeButton.setAttribute('aria-label', '关闭截图翻译')
-    closeButton.textContent = '×'
-    closeButton.addEventListener('pointerdown', (event) => event.stopPropagation())
-    closeButton.addEventListener('click', () => this.close())
-    this.header.append(title, closeButton)
+    this.closeButton.className = 'close'
+    this.closeButton.type = 'button'
+    this.closeButton.title = '关闭截图翻译'
+    this.closeButton.setAttribute('aria-label', '关闭截图翻译')
+    this.closeButton.textContent = '×'
+    this.closeButton.addEventListener('pointerdown', (event) => event.stopPropagation())
+    this.closeButton.addEventListener('click', () => this.close())
+    this.header.append(title, this.closeButton)
 
     const previewBlock = document.createElement('div')
     previewBlock.className = 'preview'
@@ -159,6 +183,9 @@ export class ScreenshotCard {
     this.result.setAttribute('aria-live', 'polite')
     this.error.className = 'error hidden'
     this.error.setAttribute('role', 'alert')
+    this.announcement.className = 'visually-hidden'
+    this.announcement.setAttribute('role', 'status')
+    this.announcement.setAttribute('aria-live', 'polite')
 
     const actions = document.createElement('div')
     actions.className = 'actions'
@@ -186,7 +213,15 @@ export class ScreenshotCard {
     this.header.addEventListener('pointerup', (event) => this.endDrag(event.pointerId))
     this.header.addEventListener('pointercancel', (event) => this.endDrag(event.pointerId))
 
-    this.card.append(this.header, previewBlock, this.badge, this.result, this.error, actions)
+    this.card.append(
+      this.header,
+      previewBlock,
+      this.badge,
+      this.result,
+      this.error,
+      actions,
+      this.announcement,
+    )
     return this.card
   }
 
@@ -277,9 +312,17 @@ export class ScreenshotCard {
   private flashCopyButton(label: string): void {
     if (this.flashTimer !== null) window.clearTimeout(this.flashTimer)
     this.copyButton.textContent = label
+    this.announce(label)
     this.flashTimer = window.setTimeout(() => {
       this.flashTimer = null
       this.copyButton.textContent = '复制译文'
     }, 1200)
+  }
+
+  private announce(message: string): void {
+    this.announcement.textContent = ''
+    requestAnimationFrame(() => {
+      this.announcement.textContent = message
+    })
   }
 }
