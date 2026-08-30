@@ -29,6 +29,10 @@ class FakePort {
   drop(): void {
     for (const listener of this.disconnectListeners) listener()
   }
+
+  emit(message: unknown): void {
+    for (const listener of this.messageListeners) listener(message)
+  }
 }
 
 function installPorts(...ports: FakePort[]) {
@@ -78,6 +82,27 @@ describe('TranslationClient', () => {
 
     expect(first.disconnectCount).toBe(1)
     expect(second.messages).toEqual([{ type: 'translate', text: 'second' }])
+  })
+
+  it('ignores events queued by a replaced request', () => {
+    const first = new FakePort()
+    const second = new FakePort()
+    installPorts(first, second)
+    const firstEvent = vi.fn()
+    const secondEvent = vi.fn()
+    const client = new TranslationClient()
+
+    client.start({ type: 'translate-image', imageDataUrl: 'data:image/png;base64,Zmlyc3Q=' }, {
+      onEvent: firstEvent,
+    })
+    client.start({ type: 'translate-image', imageDataUrl: 'data:image/png;base64,c2Vjb25k' }, {
+      onEvent: secondEvent,
+    })
+    first.emit({ type: 'delta', text: 'stale' })
+    second.emit({ type: 'delta', text: 'current' })
+
+    expect(firstEvent).not.toHaveBeenCalled()
+    expect(secondEvent).toHaveBeenCalledWith({ type: 'delta', text: 'current' })
   })
 
   it('reports only unexpected port disconnections', () => {

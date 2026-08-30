@@ -56,6 +56,7 @@ let translatedText = ''
 let privacyAccepted = false
 let translating = false
 let taskRevision = 0
+let sourceRevision = 0
 let lastErrorKind: TranslationErrorKind | null = null
 
 const imageSurface = new ImageSurface(
@@ -77,15 +78,18 @@ async function initialize(): Promise<void> {
 
   const token = new URLSearchParams(location.search).get('capture')
   if (token) {
+    const revision = ++sourceRevision
     const response = await sendMessage<{ ok: boolean; imageDataUrl?: string }>({
       type: 'consume-pending-image',
       token,
     })
     history.replaceState(null, '', location.pathname)
-    if (!response.ok || !response.imageDataUrl) {
-      imageStatus.textContent = '截图已失效，请重新发起截图翻译'
-    } else {
-      await loadSource(response.imageDataUrl, '当前页面截图')
+    if (revision === sourceRevision) {
+      if (!response.ok || !response.imageDataUrl) {
+        imageStatus.textContent = '截图已失效，请重新发起截图翻译'
+      } else {
+        await loadSource(response.imageDataUrl, '当前页面截图', revision)
+      }
     }
   }
 
@@ -163,7 +167,7 @@ document.addEventListener('keydown', (event) => {
   void startTranslation()
 })
 
-window.addEventListener('pagehide', () => client.cancel(), { once: true })
+window.addEventListener('pagehide', releaseWorkspace, { once: true })
 
 function openFilePicker(): void {
   fileInput.value = ''
@@ -177,8 +181,10 @@ async function importFile(file: File, label = file.name): Promise<void> {
     fileInput.value = ''
     return
   }
+  const revision = ++sourceRevision
   try {
     const buffer = await file.arrayBuffer()
+    if (revision !== sourceRevision) return
     const bytesCheck = checkImageBytes(new Uint8Array(buffer))
     if (!bytesCheck.ok) {
       imageStatus.textContent = '仅支持 PNG、JPEG 和 WebP 图片'
@@ -186,8 +192,10 @@ async function importFile(file: File, label = file.name): Promise<void> {
       return
     }
     const dataUrl = await readDataUrl(new Blob([buffer], { type: bytesCheck.type }))
-    await loadSource(dataUrl, label)
+    if (revision !== sourceRevision) return
+    await loadSource(dataUrl, label, revision)
   } catch {
+    if (revision !== sourceRevision) return
     imageStatus.textContent = '无法读取这张图片'
     fileInput.value = ''
   }
@@ -244,11 +252,10 @@ async function disableRevokedClipboardRead(): Promise<void> {
   imageStatus.textContent = '自动读取已关闭，仍可拖放或手动粘贴图片'
 }
 
-async function loadSource(dataUrl: string, label: string): Promise<void> {
+async function loadSource(dataUrl: string, label: string, source: number): Promise<void> {
+  const revision = replaceTask()
   await decodeImage(dataUrl)
-  client.cancel()
-  taskRevision++
-  translating = false
+  if (revision !== taskRevision || source !== sourceRevision) return
   sourceDataUrl = dataUrl
   translatedText = ''
   sourceImage.src = dataUrl
@@ -303,8 +310,12 @@ async function startTranslation(): Promise<void> {
   client.start(
     { type: 'translate-image', imageDataUrl: croppedDataUrl },
     {
-      onEvent: handleEvent,
-      onDisconnect: () => showError('network', '连接中断'),
+      onEvent: (event) => {
+        if (revision === taskRevision) handleEvent(event)
+      },
+      onDisconnect: () => {
+        if (revision === taskRevision) showError('network', '连接中断')
+      },
     },
   )
 }
@@ -356,12 +367,7 @@ function showError(kind: TranslationErrorKind, detail?: string): void {
 }
 
 function clearWorkspace(): void {
-  client.cancel()
-  taskRevision++
-  translating = false
-  sourceDataUrl = null
-  translatedText = ''
-  sourceImage.removeAttribute('src')
+  releaseWorkspace()
   imageSurface.clear()
   sourceMeta.textContent = ''
   imageStatus.textContent = ''
@@ -374,6 +380,20 @@ function clearWorkspace(): void {
   clearButton.disabled = true
   newSelectionButton.disabled = true
   resetResult('导入图片后，按 Enter 开始翻译')
+}
+
+function replaceTask(): number {
+  client.cancel()
+  translating = false
+  return ++taskRevision
+}
+
+function releaseWorkspace(): void {
+  sourceRevision++
+  replaceTask()
+  sourceDataUrl = null
+  translatedText = ''
+  sourceImage.removeAttribute('src')
 }
 
 function resetResult(message: string): void {

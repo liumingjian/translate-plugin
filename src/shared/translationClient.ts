@@ -21,7 +21,10 @@ export class TranslationClient {
     }
     this.port = port
     this.active = true
-    port.onMessage.addListener((event: TranslateEvent) => handlers.onEvent(event))
+    port.onMessage.addListener((event: TranslateEvent) => {
+      if (this.port !== port) return
+      handlers.onEvent(event)
+    })
     port.onDisconnect.addListener(() => {
       if (this.port !== port) return
       this.port = null
