@@ -60,13 +60,13 @@ status: proposed
 文本模型和截图模型共用服务地址与 API Key，仅模型名称独立：
 
 - 默认文本模型：`gpt-5.4-mini`
-- 默认截图模型：`gpt-5.5`
+- 默认截图模型：`gpt-5.4-mini`
 
-截图模型配置为空时回落到默认值，而不是回落到文本模型。服务返回“不支持图像输入”一类错误时，界面明确提示配置截图模型。
+截图模型配置为空时回落到默认值，而不是回落到文本模型。已保存的旧默认值 `gpt-5.5` 会迁移到新默认值，其他自定义模型保持不变。服务返回“不支持图像输入”一类错误时，界面明确提示配置截图模型。
 
-OpenAI 官方文档确认 `gpt-5.5` 支持图像输入、Chat Completions 与流式输出；Chat Completions 用户消息支持文本和 `image_url` 内容块。因此实现继续使用现有 `/v1/chat/completions` 与 SSE 管线，不引入第二套 API 客户端：
+OpenAI 官方文档确认 `gpt-5.4-mini` 支持图像输入、Chat Completions 与流式输出；Chat Completions 用户消息支持文本和 `image_url` 内容块。因此实现继续使用现有 `/v1/chat/completions` 与 SSE 管线，不引入第二套 API 客户端：
 
-- [GPT-5.5 模型说明](https://developers.openai.com/api/docs/models/gpt-5.5)
+- [GPT-5.4 Mini 模型说明](https://developers.openai.com/api/docs/models/gpt-5.4-mini)
 - [Chat Completions API](https://developers.openai.com/api/reference/cli/resources/chat/subresources/completions)
 
 截图翻译使用独立提示词。用户消息由“翻译契约文本”与内存中的图像数据组成；响应继续使用 ADR 0001 的首行语向标记和后续译文协议，因此现有流式解析器、错误重试和语向徽标可以复用。
@@ -126,7 +126,7 @@ OpenAI 官方文档确认 `gpt-5.5` 支持图像输入、Chat Completions 与流
 
 仓库根目录的 `.env.local` 保存可用于真实端到端测试的服务地址和 API Key，并已由 `.gitignore` 排除。文件同时提供通用的 `OPENAI_BASE_URL` / `OPENAI_API_KEY` 与现有测试命名空间的 `TP_BASE_URL` / `TP_API_KEY`；任何脚本、日志、截图、错误信息和测试报告都不得输出密钥。
 
-真实 E2E 必须以该文件中的服务为最终验收后端，不能只通过模拟响应宣告截图翻译完成。测试至少验证 `gpt-5.4-mini` 的文本翻译与 `gpt-5.5` 的截图翻译；测试素材只能使用仓库自带的无敏感信息 fixture，避免把真实页面内容发送到服务。运行前由测试命令显式加载 `.env.local`，仓库内文档和可提交文件只记录变量名，不记录变量值。
+真实 E2E 必须以该文件中的服务为最终验收后端，不能只通过模拟响应宣告截图翻译完成。测试至少验证 `gpt-5.4-mini` 的文本翻译与截图翻译；测试素材只能使用仓库自带的无敏感信息 fixture，避免把真实页面内容发送到服务。运行前由测试命令显式加载 `.env.local`，仓库内文档和可提交文件只记录变量名，不记录变量值。
 
 纯函数测试至少覆盖：
 
