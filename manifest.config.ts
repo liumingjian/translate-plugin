@@ -7,6 +7,7 @@ export default defineManifest(({ mode }) => ({
   version: '0.1.0',
   minimum_chrome_version: '116',
   permissions: ['storage', 'activeTab'],
+  optional_permissions: ['clipboardRead'],
   // 默认翻译服务的域名静态声明；用户自定义 base_url 时走 optional 运行时申请。
   host_permissions: [
     'https://api.vipsyfw.com/*',

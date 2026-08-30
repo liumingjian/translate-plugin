@@ -73,6 +73,17 @@ section { min-width: 0; padding: 22px 28px 28px; }
   gap: 8px;
 }
 
+.clipboard-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.clipboard-toggle input { accent-color: var(--accent); }
+.clipboard-toggle:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 3px; }
+
 .pane-heading { min-height: 32px; margin-bottom: 12px; }
 .image-heading-actions { justify-content: flex-end; }
 .image-heading-actions button { min-height: 28px; padding: 4px 9px; }
@@ -105,6 +116,12 @@ button.primary:hover:not(:disabled) { filter: brightness(.95); background: var(-
   border: 1px dashed var(--border);
   border-radius: 8px;
   background: var(--surface);
+}
+
+body.drag-active .empty-state,
+body.drag-active .image-stage {
+  outline: 3px solid var(--accent);
+  outline-offset: -3px;
 }
 
 .empty-icon {

@@ -5,6 +5,13 @@ import { getSettings, saveSettings } from '../shared/settings'
 import { TranslationClient } from '../shared/translationClient'
 import type { RuntimeRequest, TranslateEvent, TranslationErrorKind } from '../shared/types'
 import { ImageSurface } from './imageSurface'
+import {
+  containsClipboardReadPermission,
+  imageFileFromTransfer,
+  readClipboardImage,
+  removeClipboardReadPermission,
+  requestClipboardReadPermission,
+} from './imageImport'
 
 const ERROR_MESSAGES: Record<TranslationErrorKind, string> = {
   'no-api-key': '还没有配置 api-key',
@@ -40,6 +47,7 @@ const openOptionsButton = byId<HTMLButtonElement>('openOptions')
 const privacyDialog = byId<HTMLDialogElement>('privacyDialog')
 const privacyAccept = byId<HTMLButtonElement>('privacyAccept')
 const privacyCancel = byId<HTMLButtonElement>('privacyCancel')
+const autoReadClipboard = byId<HTMLInputElement>('autoReadClipboard')
 
 const client = new TranslationClient()
 let sourceDataUrl: string | null = null
@@ -66,17 +74,23 @@ async function initialize(): Promise<void> {
   if (!settings.imagePrivacyAccepted) privacyDialog.showModal()
 
   const token = new URLSearchParams(location.search).get('capture')
-  if (!token) return
-  const response = await sendMessage<{ ok: boolean; imageDataUrl?: string }>({
-    type: 'consume-pending-image',
-    token,
-  })
-  history.replaceState(null, '', location.pathname)
-  if (!response.ok || !response.imageDataUrl) {
-    imageStatus.textContent = '截图已失效，请重新发起截图翻译'
-    return
+  if (token) {
+    const response = await sendMessage<{ ok: boolean; imageDataUrl?: string }>({
+      type: 'consume-pending-image',
+      token,
+    })
+    history.replaceState(null, '', location.pathname)
+    if (!response.ok || !response.imageDataUrl) {
+      imageStatus.textContent = '截图已失效，请重新发起截图翻译'
+    } else {
+      await loadSource(response.imageDataUrl, '当前页面截图')
+    }
   }
-  await loadSource(response.imageDataUrl, '当前页面截图')
+
+  const hasPermission = await containsClipboardReadPermission()
+  autoReadClipboard.checked = settings.autoReadClipboard && hasPermission
+  if (settings.autoReadClipboard && !hasPermission) await saveAutoReadPreference(false)
+  if (!token && autoReadClipboard.checked) await importClipboardImage()
 }
 
 privacyAccept.addEventListener('click', () => {
@@ -95,12 +109,45 @@ clearButton.addEventListener('click', clearWorkspace)
 translateButton.addEventListener('click', () => void startTranslation())
 openOptionsButton.addEventListener('click', () => void sendMessage({ type: 'open-options' }))
 copyButton.addEventListener('click', () => void copyTranslation())
+autoReadClipboard.addEventListener('change', () => void setAutoReadClipboard(autoReadClipboard.checked))
 
 fileInput.addEventListener('change', () => {
   const file = fileInput.files?.[0]
   if (!file) return
   void importFile(file)
 })
+
+document.addEventListener('dragover', (event) => {
+  if (!event.dataTransfer) return
+  event.preventDefault()
+  event.dataTransfer.dropEffect = 'copy'
+  document.body.classList.add('drag-active')
+})
+
+document.addEventListener('dragleave', (event) => {
+  if (event.relatedTarget === null) document.body.classList.remove('drag-active')
+})
+
+document.addEventListener('drop', (event) => {
+  document.body.classList.remove('drag-active')
+  if (!event.dataTransfer) return
+  event.preventDefault()
+  const file = imageFileFromTransfer(event.dataTransfer)
+  if (file) void importFile(file)
+})
+
+document.addEventListener('paste', (event) => {
+  if (!event.clipboardData) return
+  const file = imageFileFromTransfer(event.clipboardData)
+  if (file) void importFile(file, '系统剪贴板图片')
+})
+
+chrome.permissions.onRemoved.addListener((permissions) => {
+  if (!permissions.permissions?.includes('clipboardRead')) return
+  void disableRevokedClipboardRead()
+})
+
+window.addEventListener('focus', () => void reconcileClipboardReadPermission())
 
 document.addEventListener('keydown', (event) => {
   if (event.key !== 'Enter' || event.repeat || privacyDialog.open || !sourceDataUrl) return
@@ -116,7 +163,7 @@ function openFilePicker(): void {
   fileInput.click()
 }
 
-async function importFile(file: File): Promise<void> {
+async function importFile(file: File, label = file.name): Promise<void> {
   const check = checkImageFile(file)
   if (!check.ok) {
     imageStatus.textContent = ERROR_MESSAGES[check.reason]
@@ -132,11 +179,62 @@ async function importFile(file: File): Promise<void> {
       return
     }
     const dataUrl = await readDataUrl(new Blob([buffer], { type: bytesCheck.type }))
-    await loadSource(dataUrl, file.name)
+    await loadSource(dataUrl, label)
   } catch {
     imageStatus.textContent = '无法读取这张图片'
     fileInput.value = ''
   }
+}
+
+async function setAutoReadClipboard(enabled: boolean): Promise<void> {
+  if (!enabled) {
+    await saveAutoReadPreference(false)
+    await removeClipboardReadPermission()
+    return
+  }
+
+  const granted = await requestClipboardReadPermission()
+  autoReadClipboard.checked = granted
+  await saveAutoReadPreference(granted)
+  if (!granted) {
+    imageStatus.textContent = '未授予剪贴板读取权限，仍可拖放或手动粘贴图片'
+    return
+  }
+  imageStatus.textContent = ''
+  await importClipboardImage()
+}
+
+async function importClipboardImage(): Promise<void> {
+  try {
+    const file = await readClipboardImage()
+    if (file) await importFile(file)
+  } catch {
+    const hasPermission = await containsClipboardReadPermission()
+    if (!hasPermission) {
+      autoReadClipboard.checked = false
+      await saveAutoReadPreference(false)
+      imageStatus.textContent = '自动读取已关闭，仍可拖放或手动粘贴图片'
+    } else {
+      imageStatus.textContent = '暂时无法读取系统剪贴板，可按 Ctrl/Cmd+V 手动粘贴'
+    }
+  }
+}
+
+async function saveAutoReadPreference(enabled: boolean): Promise<void> {
+  const current = await getSettings()
+  if (current.autoReadClipboard === enabled) return
+  await saveSettings({ ...current, autoReadClipboard: enabled })
+}
+
+async function reconcileClipboardReadPermission(): Promise<void> {
+  if (!autoReadClipboard.checked) return
+  if (!(await containsClipboardReadPermission())) await disableRevokedClipboardRead()
+}
+
+async function disableRevokedClipboardRead(): Promise<void> {
+  autoReadClipboard.checked = false
+  await saveAutoReadPreference(false)
+  imageStatus.textContent = '自动读取已关闭，仍可拖放或手动粘贴图片'
 }
 
 async function loadSource(dataUrl: string, label: string): Promise<void> {

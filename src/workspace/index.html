@@ -13,6 +13,10 @@
         <p>导入后默认选择整张图片</p>
       </div>
       <div class="header-actions">
+        <label class="clipboard-toggle">
+          <input id="autoReadClipboard" type="checkbox" />
+          <span>自动读取系统剪贴板图片</span>
+        </label>
         <button id="reimport" type="button" class="secondary" disabled>重新导入</button>
         <button id="clear" type="button" class="secondary" disabled>清空</button>
       </div>
@@ -30,7 +34,7 @@
         <div id="emptyState" class="empty-state">
           <div class="empty-icon" aria-hidden="true">＋</div>
           <p>选择 PNG、JPEG 或 WebP 图片</p>
-          <p class="muted">最大 20 MB</p>
+          <p class="muted">最大 20 MB，也可拖放或按 Ctrl/Cmd+V 粘贴</p>
           <button id="choose" type="button" class="primary">选择图片</button>
         </div>
         <div id="imageStage" class="image-stage hidden">

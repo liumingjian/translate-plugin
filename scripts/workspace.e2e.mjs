@@ -10,6 +10,10 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const DIST = path.join(ROOT, 'dist')
 const CHROME =
   process.env.TP_CHROME ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+const PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+  'base64',
+)
 const tempDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'translate-plugin-workspace-'))
 const fixturePath = path.join(tempDirectory, 'crop-image.png')
 
@@ -267,6 +271,203 @@ try {
   await workspace.click('#clear')
   await workspace.waitForFunction(() => !document.querySelector('#emptyState')?.classList.contains('hidden'))
 
+  const hasClipboardReadPermission = () =>
+    worker.evaluate(() => chrome.permissions.contains({ permissions: ['clipboardRead'] }))
+
+  const writeClipboardImage = async () => {
+    await workspace.bringToFront()
+    await workspace.evaluate(async (dataUrl) => {
+      const blob = await (await fetch(dataUrl)).blob()
+      await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })])
+    }, `data:image/png;base64,${PNG.toString('base64')}`)
+  }
+
+  const dropImage = async (name) => {
+    await workspace.evaluate(
+      (dataUrl, fileName) => {
+        const bytes = Uint8Array.from(atob(dataUrl.split(',')[1]), (value) => value.charCodeAt(0))
+        const transfer = new DataTransfer()
+        transfer.items.add(new File([bytes], fileName, { type: 'image/png' }))
+        document.dispatchEvent(new DragEvent('dragover', { bubbles: true, dataTransfer: transfer }))
+        document.dispatchEvent(new DragEvent('drop', { bubbles: true, dataTransfer: transfer }))
+      },
+      `data:image/png;base64,${PNG.toString('base64')}`,
+      name,
+    )
+  }
+
+  const pasteClipboardImage = async (focusSelector) => {
+    await writeClipboardImage()
+    await workspace.click(focusSelector)
+    const session = await workspace.createCDPSession()
+    await session.send('Input.dispatchKeyEvent', {
+      type: 'rawKeyDown',
+      key: 'v',
+      code: 'KeyV',
+      windowsVirtualKeyCode: 86,
+      commands: ['Paste'],
+    })
+    await session.send('Input.dispatchKeyEvent', {
+      type: 'keyUp',
+      key: 'v',
+      code: 'KeyV',
+      windowsVirtualKeyCode: 86,
+    })
+  }
+
+  assert.equal(await hasClipboardReadPermission(), false)
+  await dropImage('dragged-image.png')
+  await workspace.waitForFunction(
+    () => document.querySelector('#sourceMeta')?.textContent === 'dragged-image.png',
+  )
+  assert.equal(await hasClipboardReadPermission(), false)
+
+  await workspace.click('#clear')
+  await pasteClipboardImage('#emptyState')
+  await workspace.waitForFunction(
+    () => document.querySelector('#sourceMeta')?.textContent === '系统剪贴板图片',
+  )
+  assert.equal(await hasClipboardReadPermission(), false)
+
+  // Headless Chrome does not expose the extension permission bubble through CDP.
+  // Replace only its decision; acquisition still uses Chrome's real clipboard APIs.
+  await workspace.evaluate(() => {
+    Object.defineProperty(chrome.permissions, 'request', {
+      configurable: true,
+      value: async () => false,
+    })
+  })
+  await workspace.click('#autoReadClipboard')
+  await workspace.waitForFunction(
+    () =>
+      document.querySelector('#autoReadClipboard')?.checked === false &&
+      document.querySelector('#imageStatus')?.textContent?.includes('未授予剪贴板读取权限'),
+    { timeout: 10_000 },
+  )
+  assert.equal(await hasClipboardReadPermission(), false)
+  assert.equal(
+    await workspace.$eval('#sourceMeta', (element) => element.textContent),
+    '系统剪贴板图片',
+  )
+
+  await browser.defaultBrowserContext().overridePermissions(extensionOrigin, [
+    'clipboard-read',
+    'clipboard-write',
+  ])
+  await workspace.evaluate(() => {
+    const permissionState = { granted: false }
+    Object.defineProperties(chrome.permissions, {
+      contains: {
+        configurable: true,
+        value: async () => permissionState.granted,
+      },
+      remove: {
+        configurable: true,
+        value: async () => {
+          permissionState.granted = false
+          return true
+        },
+      },
+      request: {
+        configurable: true,
+        value: async () => {
+          permissionState.granted = true
+          return true
+        },
+      },
+    })
+    window.__e2eClipboardPermission = permissionState
+  })
+
+  await workspace.click('#clear')
+  await writeClipboardImage()
+  await workspace.click('#autoReadClipboard')
+  await workspace.waitForFunction(
+    () =>
+      document.querySelector('#autoReadClipboard')?.checked === true &&
+      document.querySelector('#sourceMeta')?.textContent === '系统剪贴板图片',
+    { timeout: 10_000 },
+  )
+
+  await workspace.evaluateOnNewDocument(() => {
+    const permissionState = { granted: true }
+    Object.defineProperties(chrome.permissions, {
+      contains: { configurable: true, value: async () => permissionState.granted },
+      remove: {
+        configurable: true,
+        value: async () => {
+          permissionState.granted = false
+          return true
+        },
+      },
+      request: {
+        configurable: true,
+        value: async () => {
+          permissionState.granted = true
+          return true
+        },
+      },
+    })
+    window.__e2eClipboardPermission = permissionState
+  })
+  await workspace.click('#clear')
+  await writeClipboardImage()
+  await workspace.reload({ waitUntil: 'load' })
+  await workspace.waitForFunction(
+    () =>
+      document.querySelector('#autoReadClipboard')?.checked === true &&
+      document.querySelector('#sourceMeta')?.textContent === '系统剪贴板图片',
+    { timeout: 10_000 },
+  )
+
+  await workspace.evaluate(() => navigator.clipboard.writeText('clipboard contains text only'))
+  await workspace.click('#autoReadClipboard')
+  await workspace.waitForFunction(
+    () => document.querySelector('#autoReadClipboard')?.checked === false,
+  )
+  await workspace.click('#autoReadClipboard')
+  await workspace.waitForFunction(
+    () => document.querySelector('#autoReadClipboard')?.checked === true,
+    { timeout: 10_000 },
+  )
+  assert.equal(
+    await workspace.$eval('#sourceMeta', (element) => element.textContent),
+    '系统剪贴板图片',
+  )
+  assert.equal(await workspace.$eval('#imageStatus', (element) => element.textContent), '')
+
+  await workspace.evaluate(() => {
+    window.__e2eClipboardPermission.granted = false
+    window.dispatchEvent(new FocusEvent('focus'))
+  })
+  await workspace.waitForFunction(
+    () => document.querySelector('#autoReadClipboard')?.checked === false,
+  )
+  assert.match(
+    await workspace.$eval('#imageStatus', (element) => element.textContent),
+    /自动读取已关闭/,
+  )
+  assert.equal(
+    await workspace.$eval('#sourceMeta', (element) => element.textContent),
+    '系统剪贴板图片',
+  )
+
+  await dropImage('after-revocation.png')
+  await workspace.waitForFunction(
+    () => document.querySelector('#sourceMeta')?.textContent === 'after-revocation.png',
+  )
+  await pasteClipboardImage('#imageStage')
+  await workspace.waitForFunction(
+    () => document.querySelector('#sourceMeta')?.textContent === '系统剪贴板图片',
+  )
+
+  const afterRevocationInput = await workspace.$('#fileInput')
+  assert(afterRevocationInput)
+  await afterRevocationInput.uploadFile(fixturePath)
+  await workspace.waitForFunction(
+    () => document.querySelector('#sourceMeta')?.textContent === 'crop-image.png',
+  )
+
   await restrictedFixture.bringToFront()
   const fallbackPopup = await openPopup()
   const beforeFallback = new Set(browser.targets())
@@ -299,6 +500,9 @@ try {
       streamedText: '第一段第二段',
       cropPixels: `${encodedCrop.width}x${encodedCrop.height}`,
       explicitSubmitMethods: ['button', 'double-click', 'Enter'],
+      imageImports: ['file', 'drop', 'manual-paste', 'auto-read'],
+      clipboardDenial: true,
+      clipboardRevocation: true,
       restrictedPageFallback: true,
     }),
   )
