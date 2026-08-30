@@ -115,13 +115,6 @@ export const STYLES = `
   color: var(--tp-muted);
 }
 
-.screenshot-preview {
-  display: block;
-  width: 100%;
-  max-height: 132px;
-  object-fit: contain;
-}
-
 .badge {
   display: flex;
   align-items: center;

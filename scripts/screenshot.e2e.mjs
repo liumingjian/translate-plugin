@@ -89,6 +89,10 @@ try {
   ))
 
   const page = await browser.newPage()
+  await browser.defaultBrowserContext().overridePermissions(baseUrl, [
+    'clipboard-read',
+    'clipboard-write',
+  ])
   await page.setViewport({ width: 900, height: 700, deviceScaleFactor: 1 })
   await page.goto(baseUrl, { waitUntil: 'load' })
   await page.bringToFront()
@@ -152,7 +156,7 @@ try {
     page,
     selection.left + selection.width / 2,
     selection.top + selection.height / 2,
-    210,
+    660,
     220,
   )
   selection = await screenshotSelection(page)
@@ -178,7 +182,13 @@ try {
   assert.equal(firstStream.result, '第一段')
   assert(firstStream.previewVisible)
   assert(cardNearRect(firstStream.rect, confirmedRect), 'the card should be placed near the confirmed area')
+  assert(
+    firstStream.rect.right <= confirmedRect.left,
+    'the card should flip to the left of a right-edge selection',
+  )
+  assertCardInViewport(firstStream.rect, { width: 900, height: 700 })
   await page.waitForFunction(() => window.__findTranslationCard()?.result === '第一段第二段')
+  await page.waitForFunction(() => window.__findTranslationCard()?.copyVisible)
 
   await waitForRequestCount(1)
   assert.equal(requests.length, 1, 'confirming twice must still create one request')
@@ -194,13 +204,45 @@ try {
       height: confirmedRect.bottom - confirmedRect.top,
     },
   )
-  assert.deepEqual(pixels.center, [220, 30, 30, 255])
+  assert.deepEqual(pixels.center, [30, 80, 220, 255])
+
+  await clickCardButton(page, '复制译文')
+  await page.waitForFunction(() => window.__findTranslationCard()?.copyLabel === '已复制')
+  assert.equal(await page.evaluate(() => navigator.clipboard.readText()), '第一段第二段')
+
+  // 页面外点只影响划词浮层，截图卡继续驻留。
+  await page.mouse.click(20, 680)
+  assert(await screenshotCard(page), 'outside clicks must not dismiss the screenshot card')
+
+  const beforeDrag = await screenshotCard(page)
+  const header = await screenshotCardHeader(page)
+  await page.mouse.move(header.x, header.y)
+  await page.mouse.down()
+  await page.mouse.move(890, 690, { steps: 10 })
+  await page.mouse.up()
+  const afterDrag = await screenshotCard(page)
+  assert.equal(
+    afterDrag.rect.right - afterDrag.rect.left,
+    beforeDrag.rect.right - beforeDrag.rect.left,
+  )
+  assert.equal(
+    afterDrag.rect.bottom - afterDrag.rect.top,
+    beforeDrag.rect.bottom - beforeDrag.rect.top,
+  )
+  assertCardInViewport(afterDrag.rect, { width: 900, height: 700 })
+  assert.notDeepEqual(afterDrag.rect, beforeDrag.rect, 'dragging the header should move the card')
+
+  await clickCardButton(page, '关闭截图翻译')
+  await page.waitForFunction(() => !window.__findTranslationCard())
 
   await beginScreenshot(browser, worker, extensionOrigin, page)
   await drag(page, 120, 160, 260, 280)
   await page.keyboard.press('Enter')
   await page.waitForFunction(() => !window.__findScreenshotDialog())
   await waitForRequestCount(2)
+  await page.waitForFunction(() => window.__findTranslationCard()?.result === '第一段')
+  await page.keyboard.press('Escape')
+  await page.waitForFunction(() => !window.__findTranslationCard())
 
   await beginScreenshot(browser, worker, extensionOrigin, page)
   await drag(page, 120, 160, 260, 280)
@@ -277,6 +319,7 @@ try {
     cancellationPaths: ['Escape', 'button'],
     confirmedPixels: [`${pixels.width}x${pixels.height}`, `${scaledPixels.width}x${scaledPixels.height}@2x`],
     streamedText: '第一段第二段',
+    card: ['edge-flipped', 'viewport-constrained', 'dragged', 'persistent', 'copied', 'closed'],
     iframeSelectionPreserved: true,
   }))
 } finally {
@@ -444,6 +487,26 @@ async function screenshotCard(page) {
   return page.evaluate(() => window.__findTranslationCard())
 }
 
+async function screenshotCardHeader(page) {
+  return page.evaluate(() => {
+    const card = window.__findScreenshotCard()
+    const rect = card.querySelector('header').getBoundingClientRect()
+    return { x: rect.left + 24, y: rect.top + rect.height / 2 }
+  })
+}
+
+async function clickCardButton(page, label) {
+  const position = await page.evaluate((text) => {
+    const card = window.__findScreenshotCard()
+    const button = [...card.querySelectorAll('button')].find((candidate) =>
+      candidate.textContent === text || candidate.getAttribute('aria-label') === text,
+    )
+    const rect = button.getBoundingClientRect()
+    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
+  }, label)
+  await page.mouse.click(position.x, position.y)
+}
+
 function cardNearRect(card, anchor) {
   const horizontalGap = Math.min(
     Math.abs(card.left - anchor.right),
@@ -454,6 +517,13 @@ function cardNearRect(card, anchor) {
     Math.abs(card.bottom - anchor.top),
   )
   return horizontalGap <= 16 || verticalGap <= 16
+}
+
+function assertCardInViewport(card, viewport) {
+  assert(card.left >= 8)
+  assert(card.top >= 8)
+  assert(card.right <= viewport.width - 8 + 0.001)
+  assert(card.bottom <= viewport.height - 8 + 0.001)
 }
 
 async function decodeImage(page, dataUrl) {
@@ -491,20 +561,28 @@ async function installPageHelpers(page) {
     window.__findTranslationCard = () => {
       for (const host of document.documentElement.children) {
         const root = host.shadowRoot
-        const title = [...(root?.querySelectorAll('.header span') ?? [])]
-          .find((element) => element.textContent === '截图翻译')
-        if (!title) continue
-        const card = title.closest('.card')
-        if (!card || card.classList.contains('hidden')) continue
+        const card = root?.querySelector('[role="dialog"][aria-label="截图翻译结果"]')
+        if (!card) continue
         const rect = card.getBoundingClientRect()
         const preview = card.querySelector('img[alt="已确认的截图"]')
+        const copy = [...card.querySelectorAll('button')]
+          .find((button) => button.textContent === '复制译文' || button.textContent === '已复制')
         return {
-          title: title.textContent,
-          badge: card.querySelector('.badge')?.textContent,
-          result: card.querySelector('.result')?.textContent,
+          title: '截图翻译',
+          badge: card.querySelector('[aria-label="翻译语言方向"]')?.textContent,
+          result: card.querySelector('[role="status"]')?.textContent,
+          copyLabel: copy?.textContent,
+          copyVisible: !!copy && copy.getBoundingClientRect().height > 0,
           previewVisible: !!preview && preview.getBoundingClientRect().height > 0,
           rect: { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom },
         }
+      }
+      return null
+    }
+    window.__findScreenshotCard = () => {
+      for (const host of document.documentElement.children) {
+        const card = host.shadowRoot?.querySelector('[role="dialog"][aria-label="截图翻译结果"]')
+        if (card) return card
       }
       return null
     }

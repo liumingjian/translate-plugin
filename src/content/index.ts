@@ -7,6 +7,7 @@ import type { ContentRequest, TranslateEvent } from '../shared/types'
 import { Overlay } from './overlay'
 import { ScreenshotMode } from './screenshotMode'
 import type { ConfirmedScreenshot } from './screenshotMode'
+import { ScreenshotCard } from './screenshotCard'
 import { readSelection } from './selectionSource'
 
 /** 当前选区的锚点求值器 —— 每次滚动都重新问一次，图标才跟得住。 */
@@ -41,9 +42,17 @@ const overlay = new Overlay({
   onCardClose: () => {
     // 关掉卡片就该停掉还在跑的请求，否则译文白烧 token 也白流。
     closePort()
-    screenshotClient.cancel()
   },
 })
+
+const screenshotCard = window === window.top
+  ? new ScreenshotCard({
+      onClose: () => {
+        screenshotRevision++
+        screenshotClient.cancel()
+      },
+    })
+  : null
 
 const screenshotMode = window === window.top
   ? new ScreenshotMode({ onConfirm: (screenshot) => void confirmScreenshot(screenshot) })
@@ -107,12 +116,13 @@ function dismiss(): void {
   overlay.hideIcon()
   overlay.hideCard()
   closePort()
-  screenshotClient.cancel()
 }
 
 function beginScreenshot(imageDataUrl: string): void {
   if (!screenshotMode) return
   dismiss()
+  screenshotCard?.close()
+  screenshotClient.cancel()
   screenshotRevision++
   screenshotMode.begin(imageDataUrl)
 }
@@ -130,12 +140,12 @@ async function confirmScreenshot(screenshot: ConfirmedScreenshot): Promise<void>
     cropped = await cropImageDataUrl(screenshot.imageDataUrl, screenshot.rect, screenshot.viewport)
   } catch {
     if (revision !== screenshotRevision) return
-    overlay.openImageCard(screenshot.imageDataUrl, anchor)
-    overlay.showError('image-unsupported', '无法处理框选区域')
+    screenshotCard?.open(screenshot.imageDataUrl, anchor)
+    screenshotCard?.showError('image-unsupported', '无法处理框选区域')
     return
   }
   if (revision !== screenshotRevision) return
-  overlay.openImageCard(cropped, anchor)
+  screenshotCard?.open(cropped, anchor)
   screenshotClient.start(
     { type: 'translate-image', imageDataUrl: cropped },
     {
@@ -143,24 +153,24 @@ async function confirmScreenshot(screenshot: ConfirmedScreenshot): Promise<void>
         if (revision !== screenshotRevision) return
         switch (event.type) {
           case 'lang':
-            overlay.setLang(event.source, event.target)
+            screenshotCard?.setLang(event.source, event.target)
             break
           case 'delta':
-            overlay.appendDelta(event.text)
+            screenshotCard?.appendDelta(event.text)
             break
           case 'done':
-            overlay.finish()
+            screenshotCard?.finish()
             screenshotClient.finish()
             break
           case 'error':
-            overlay.showError(event.kind, event.detail)
+            screenshotCard?.showError(event.kind, event.detail)
             screenshotClient.finish()
             break
         }
       },
       onDisconnect: () => {
         if (revision === screenshotRevision) {
-          overlay.showError('network', '连接中断，请重试')
+          screenshotCard?.showError('network', '连接中断，请重试')
         }
       },
     },
