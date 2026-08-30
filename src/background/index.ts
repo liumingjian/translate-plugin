@@ -1,11 +1,14 @@
 import { CACHE_CAPACITY } from '../shared/constants'
+import { imageChatBody, textChatBody } from '../shared/chat'
+import type { ChatRequestBody } from '../shared/chat'
 import { LangHeaderParser } from '../shared/langHeader'
 import { Lru } from '../shared/lru'
-import { SYSTEM_PROMPT } from '../shared/prompt'
 import { checkSelection } from '../shared/selection'
 import { chatCompletionsUrl, getSettings, normalizeBaseUrl } from '../shared/settings'
 import { PORT_NAME } from '../shared/types'
 import type {
+  ContentRequest,
+  RuntimeRequest,
   Settings,
   TranslateEvent,
   TranslateRequest,
@@ -25,14 +28,63 @@ const MAX_ATTEMPTS = 3
 const RETRY_BACKOFF_MS = [400, 1200]
 
 const cache = new Lru<CachedTranslation>(CACHE_CAPACITY)
+const pendingImages = new Map<string, string>()
 
-chrome.action.onClicked.addListener(() => {
-  void chrome.runtime.openOptionsPage()
+chrome.commands.onCommand.addListener((command, tab) => {
+  if (command === 'screenshot-translate') void captureActiveTab(tab)
 })
 
-chrome.runtime.onMessage.addListener((message: { type?: string }) => {
-  if (message?.type === 'open-options') void chrome.runtime.openOptionsPage()
-})
+chrome.runtime.onMessage.addListener(
+  (message: RuntimeRequest, _sender, sendResponse: (response?: unknown) => void) => {
+    switch (message?.type) {
+      case 'open-options':
+        void chrome.runtime.openOptionsPage()
+        return
+      case 'open-shortcuts':
+        void chrome.tabs.create({ url: 'chrome://extensions/shortcuts' })
+        return
+      case 'open-workspace':
+        void openWorkspace()
+        return
+      case 'capture-active-tab':
+        void captureActiveTab()
+          .then(() => sendResponse({ ok: true }))
+          .catch((error: unknown) => sendResponse({ ok: false, error: describe(error) }))
+        return true
+      case 'consume-pending-image': {
+        const imageDataUrl = pendingImages.get(message.token)
+        pendingImages.delete(message.token)
+        sendResponse({ ok: !!imageDataUrl, imageDataUrl })
+        return
+      }
+    }
+  },
+)
+
+async function captureActiveTab(commandTab?: chrome.tabs.Tab): Promise<void> {
+  const tab = commandTab?.id
+    ? commandTab
+    : (await chrome.tabs.query({ active: true, currentWindow: true }))[0]
+  if (!tab?.id || tab.windowId === undefined) throw new Error('没有可截图的活动标签页')
+  const imageDataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' })
+  const message: ContentRequest = { type: 'begin-screenshot', imageDataUrl }
+  try {
+    await chrome.tabs.sendMessage(tab.id, message, { frameId: 0 })
+  } catch {
+    await openWorkspace(imageDataUrl)
+  }
+}
+
+async function openWorkspace(imageDataUrl?: string): Promise<void> {
+  let suffix = ''
+  if (imageDataUrl) {
+    const token = crypto.randomUUID()
+    pendingImages.set(token, imageDataUrl)
+    suffix = `?capture=${encodeURIComponent(token)}`
+    globalThis.setTimeout(() => pendingImages.delete(token), 60_000)
+  }
+  await chrome.tabs.create({ url: chrome.runtime.getURL(`src/workspace/index.html${suffix}`) })
+}
 
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name !== PORT_NAME) return
@@ -41,7 +93,6 @@ chrome.runtime.onConnect.addListener((port) => {
   port.onDisconnect.addListener(() => abort.abort())
 
   port.onMessage.addListener((message: TranslateRequest) => {
-    if (message?.type !== 'translate') return
     const emit = (event: TranslateEvent) => {
       try {
         port.postMessage(event)
@@ -51,14 +102,20 @@ chrome.runtime.onConnect.addListener((port) => {
     }
     // translate() 自己会把预期内的失败转成 error 事件；这里兜的是它本身抛出的意外
     // （如读取设置失败），不兜住的话卡片会永远转圈。
-    translate(message.text, abort.signal, emit).catch((error: unknown) => {
+    const task =
+      message?.type === 'translate'
+        ? translateText(message.text, abort.signal, emit)
+        : message?.type === 'translate-image'
+          ? translateImage(message.imageDataUrl, abort.signal, emit)
+          : Promise.resolve()
+    task.catch((error: unknown) => {
       if (abort.signal.aborted) return
       emit({ type: 'error', kind: 'network', detail: describe(error) })
     })
   })
 })
 
-async function translate(
+async function translateText(
   raw: string,
   signal: AbortSignal,
   emit: (event: TranslateEvent) => void,
@@ -92,11 +149,58 @@ async function translate(
       if (signal.aborted) return
     }
 
-    const outcome = await attemptTranslate(settings, check.text, signal, emit)
+    const outcome = await attemptTranslate(
+      settings,
+      textChatBody(settings, check.text),
+      false,
+      signal,
+      emit,
+    )
     if (outcome.kind === 'aborted') return
     if (outcome.kind === 'ok') {
       // 被掐断的流不进缓存，否则半截译文会一直命中，用户重试也甩不掉。
       if (outcome.complete) cache.set(cacheKey, outcome.collected)
+      emit({ type: 'done', cached: false })
+      return
+    }
+    if (outcome.retryable && attempt < MAX_ATTEMPTS - 1) continue
+    emit({ type: 'error', kind: outcome.errorKind, detail: outcome.detail })
+    return
+  }
+}
+
+async function translateImage(
+  imageDataUrl: string,
+  signal: AbortSignal,
+  emit: (event: TranslateEvent) => void,
+): Promise<void> {
+  if (!/^data:image\/(?:png|jpeg|webp);base64,/i.test(imageDataUrl)) {
+    emit({ type: 'error', kind: 'image-unsupported' })
+    return
+  }
+  if (imageDataUrl.length > 28_000_000) {
+    emit({ type: 'error', kind: 'image-too-large' })
+    return
+  }
+  const settings = await getSettings()
+  if (settings.apiKey.trim() === '') {
+    emit({ type: 'error', kind: 'no-api-key' })
+    return
+  }
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    if (attempt > 0) {
+      await sleep(RETRY_BACKOFF_MS[attempt - 1] ?? 1200, signal)
+      if (signal.aborted) return
+    }
+    const outcome = await attemptTranslate(
+      settings,
+      imageChatBody(settings, imageDataUrl),
+      true,
+      signal,
+      emit,
+    )
+    if (outcome.kind === 'aborted') return
+    if (outcome.kind === 'ok') {
       emit({ type: 'done', cached: false })
       return
     }
@@ -117,7 +221,8 @@ type Attempt =
  */
 async function attemptTranslate(
   settings: Settings,
-  text: string,
+  body: ChatRequestBody,
+  imageRequest: boolean,
   signal: AbortSignal,
   emit: (event: TranslateEvent) => void,
 ): Promise<Attempt> {
@@ -130,14 +235,7 @@ async function attemptTranslate(
         'Content-Type': 'application/json',
         Authorization: `Bearer ${settings.apiKey}`,
       },
-      body: JSON.stringify({
-        model: settings.model,
-        stream: true,
-        messages: [
-          { role: 'system', content: SYSTEM_PROMPT },
-          { role: 'user', content: text },
-        ],
-      }),
+      body: JSON.stringify(body),
     })
   } catch (error) {
     if (signal.aborted) return { kind: 'aborted' }
@@ -146,6 +244,7 @@ async function attemptTranslate(
 
   if (!response.ok || !response.body) {
     const transient = TRANSIENT_STATUS.has(response.status)
+    const detail = await errorDetail(response)
     return {
       kind: 'failed',
       retryable: transient,
@@ -153,8 +252,10 @@ async function attemptTranslate(
         ? 'auth'
         : transient
           ? 'unavailable'
-          : 'network',
-      detail: await errorDetail(response),
+          : imageRequest && /image|vision|multimodal|图片|视觉/i.test(detail)
+            ? 'image-unsupported'
+            : 'network',
+      detail,
     }
   }
 
@@ -202,6 +303,10 @@ async function attemptTranslate(
 
   if (collected.text.trim() === '') {
     return { kind: 'failed', retryable: !emitted, errorKind: 'empty' }
+  }
+
+  if (imageRequest && collected.text.trim() === 'NO_TEXT') {
+    return { kind: 'failed', retryable: false, errorKind: 'no-text' }
   }
 
   return { kind: 'ok', collected, complete: sse.sawDone || finished }

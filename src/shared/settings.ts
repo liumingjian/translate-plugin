@@ -1,4 +1,4 @@
-import { DEFAULT_BASE_URL, DEFAULT_MODEL } from './constants'
+import { DEFAULT_BASE_URL, DEFAULT_IMAGE_MODEL, DEFAULT_MODEL } from './constants'
 import type { Settings } from './types'
 
 const KEY = 'settings'
@@ -7,6 +7,9 @@ export const DEFAULT_SETTINGS: Settings = {
   baseUrl: DEFAULT_BASE_URL,
   apiKey: '',
   model: DEFAULT_MODEL,
+  imageModel: DEFAULT_IMAGE_MODEL,
+  imagePrivacyAccepted: false,
+  autoReadClipboard: false,
 }
 
 /** api-key 只存本机，不进 storage.sync —— 同步到 Google 账号是不必要的暴露面。 */
