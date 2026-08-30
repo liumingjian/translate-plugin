@@ -31,8 +31,9 @@ const SCREENSHOT_STYLES = `
 :host { all: initial; }
 * {
   box-sizing: border-box;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
-    'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  font-family: "SF Pro Text", system-ui, -apple-system, BlinkMacSystemFont,
+    "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  letter-spacing: 0;
 }
 .surface {
   position: fixed;
@@ -52,20 +53,20 @@ const SCREENSHOT_STYLES = `
 .selection {
   position: absolute;
   display: none;
-  border: 2px solid #4f8cff;
-  background: rgba(79, 140, 255, .08);
+  border: 2px solid #2997ff;
+  background: rgba(0, 102, 204, .08);
   box-shadow: 0 0 0 9999px rgba(0, 0, 0, .45);
   cursor: move;
   outline: none;
 }
 .selection.visible { display: block; }
-.selection:focus-visible { border-color: #facc15; outline: 2px solid #111; outline-offset: 3px; }
+.selection:focus-visible { outline: 3px solid #ffffff; outline-offset: 2px; }
 .handle {
   position: absolute;
   width: 12px;
   height: 12px;
-  border: 2px solid #2563eb;
-  border-radius: 2px;
+  border: 2px solid #0066cc;
+  border-radius: 50%;
   background: #fff;
   padding: 0;
 }
@@ -83,15 +84,14 @@ const SCREENSHOT_STYLES = `
   bottom: 24px;
   transform: translateX(-50%);
   width: min(420px, calc(100vw - 16px));
-  padding: 10px;
+  padding: 10px 12px;
   display: flex;
   align-items: center;
   gap: 8px;
-  border: 1px solid rgba(255, 255, 255, .22);
+  border: 1px solid #454547;
   border-radius: 8px;
-  background: rgba(20, 22, 26, .94);
+  background: rgba(0, 0, 0, .92);
   color: #fff;
-  box-shadow: 0 8px 28px rgba(0, 0, 0, .35);
   cursor: default;
 }
 .status {
@@ -102,19 +102,21 @@ const SCREENSHOT_STYLES = `
 }
 button {
   min-height: 32px;
-  padding: 5px 12px;
-  border: 1px solid rgba(255, 255, 255, .25);
-  border-radius: 6px;
+  padding: 5px 13px;
+  border: 1px solid #7a7a7a;
+  border-radius: 9999px;
   background: transparent;
   color: #fff;
   font-size: 13px;
   cursor: pointer;
 }
-button.primary { border-color: transparent; background: #2563eb; }
+button:hover:not(:disabled) { background: #272729; }
+button.primary { border-color: #0066cc; background: #0066cc; }
+button.primary:hover:not(:disabled) { border-color: #0071e3; background: #0071e3; }
 button:disabled { opacity: .45; cursor: default; }
 button:focus-visible { outline: 3px solid #fff; outline-offset: 2px; }
 .selection .handle { min-height: 12px; padding: 0; }
-.selection .handle:focus-visible { outline: 2px solid #111; box-shadow: 0 0 0 4px #facc15; }
+.selection .handle:focus-visible { outline: 2px solid #ffffff; box-shadow: 0 0 0 4px #2997ff; }
 .privacy {
   position: absolute;
   left: 50%;
@@ -122,11 +124,10 @@ button:focus-visible { outline: 3px solid #fff; outline-offset: 2px; }
   transform: translate(-50%, -50%);
   width: min(420px, calc(100vw - 24px));
   padding: 20px;
-  border: 1px solid rgba(255, 255, 255, .25);
+  border: 1px solid #454547;
   border-radius: 8px;
-  background: #17191d;
+  background: #272729;
   color: #fff;
-  box-shadow: 0 12px 40px rgba(0, 0, 0, .5);
   cursor: default;
 }
 .privacy.hidden { display: none; }
@@ -137,6 +138,10 @@ button:focus-visible { outline: 3px solid #fff; outline-offset: 2px; }
 @media (max-width: 420px) {
   .toolbar { flex-wrap: wrap; bottom: 8px; }
   .status { width: 100%; flex-basis: 100%; white-space: normal; }
+  .toolbar button { flex: 1 1 auto; }
+  .privacy { padding: 17px; }
+  .privacy-actions { flex-wrap: wrap; }
+  .privacy-actions button { flex: 1 1 auto; }
 }
 `
 
