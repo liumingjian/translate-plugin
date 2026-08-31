@@ -1,32 +1,18 @@
-import { DEFAULT_BASE_URL, DEFAULT_IMAGE_MODEL, DEFAULT_MODEL } from './constants'
+import { DEFAULT_BASE_URL, DEFAULT_MODEL } from './constants'
 import type { Settings } from './types'
 
 const KEY = 'settings'
-const LEGACY_DEFAULT_IMAGE_MODEL = 'gpt-5.5'
 
 export const DEFAULT_SETTINGS: Settings = {
   baseUrl: DEFAULT_BASE_URL,
   apiKey: '',
   model: DEFAULT_MODEL,
-  imageModel: DEFAULT_IMAGE_MODEL,
-  imagePrivacyAccepted: false,
-  autoReadClipboard: false,
 }
 
 /** api-key 只存本机，不进 storage.sync —— 同步到 Google 账号是不必要的暴露面。 */
 export async function getSettings(): Promise<Settings> {
   const stored = await chrome.storage.local.get(KEY)
-  return migrateSettings(stored[KEY])
-}
-
-export function migrateSettings(stored: unknown): Settings {
-  if (!stored || typeof stored !== 'object') return { ...DEFAULT_SETTINGS }
-  const migrated = { ...DEFAULT_SETTINGS, ...(stored as Partial<Settings>) }
-  const imageModel = typeof migrated.imageModel === 'string' ? migrated.imageModel.trim() : ''
-  migrated.imageModel = imageModel === '' || imageModel === LEGACY_DEFAULT_IMAGE_MODEL
-    ? DEFAULT_IMAGE_MODEL
-    : imageModel
-  return migrated
+  return { ...DEFAULT_SETTINGS, ...(stored[KEY] as Partial<Settings> | undefined) }
 }
 
 export async function saveSettings(settings: Settings): Promise<void> {

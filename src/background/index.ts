@@ -1,28 +1,22 @@
 import { CACHE_CAPACITY } from '../shared/constants'
-import { imageChatBody, textChatBody } from '../shared/chat'
-import type { ChatRequestBody } from '../shared/chat'
 import { LangHeaderParser } from '../shared/langHeader'
 import { Lru } from '../shared/lru'
+import { SYSTEM_PROMPT } from '../shared/prompt'
 import { checkSelection } from '../shared/selection'
 import { chatCompletionsUrl, getSettings, normalizeBaseUrl } from '../shared/settings'
-import {
-  NoTextOutputBuffer,
-  classifyHttpError,
-  classifyOutput,
-} from '../shared/translationErrors'
 import { PORT_NAME } from '../shared/types'
 import type {
-  ContentRequest,
-  RuntimeRequest,
   Settings,
   TranslateEvent,
   TranslateRequest,
   TranslationErrorKind,
 } from '../shared/types'
-import { SseParser, deltaOf } from './sse'
-import { PendingImages } from './pendingImages'
+import { SseParser, deltaOf, finishReasonOf } from './sse'
 
 type CachedTranslation = { source?: string; target?: string; text: string }
+
+/** 上游瞬时故障：重试一下多半就好了。 */
+const TRANSIENT_STATUS = new Set([408, 425, 429, 500, 502, 503, 504])
 
 /** 首个 delta 吐出之前最多试这么多次（含第一次）。 */
 const MAX_ATTEMPTS = 3
@@ -31,72 +25,14 @@ const MAX_ATTEMPTS = 3
 const RETRY_BACKOFF_MS = [400, 1200]
 
 const cache = new Lru<CachedTranslation>(CACHE_CAPACITY)
-const pendingImages = new PendingImages(60_000)
 
-chrome.commands.onCommand.addListener((command, tab) => {
-  if (command === 'screenshot-translate') void captureActiveTab(tab)
+chrome.action.onClicked.addListener(() => {
+  void chrome.runtime.openOptionsPage()
 })
 
-chrome.runtime.onMessage.addListener(
-  (message: RuntimeRequest, _sender, sendResponse: (response?: unknown) => void) => {
-    switch (message?.type) {
-      case 'open-options':
-        void chrome.runtime.openOptionsPage()
-        return
-      case 'open-image-model-settings':
-        void chrome.tabs.create({
-          url: chrome.runtime.getURL('src/options/index.html#imageModel'),
-        })
-        return
-      case 'open-shortcuts':
-        void chrome.tabs.create({ url: 'chrome://extensions/shortcuts' })
-        return
-      case 'open-workspace':
-        void openWorkspace()
-        return
-      case 'capture-active-tab':
-        void captureActiveTab()
-          .then(() => sendResponse({ ok: true }))
-          .catch((error: unknown) => sendResponse({ ok: false, error: describe(error) }))
-        return true
-      case 'consume-pending-image': {
-        const imageDataUrl = pendingImages.consume(message.token)
-        sendResponse({ ok: !!imageDataUrl, imageDataUrl })
-        return
-      }
-    }
-  },
-)
-
-async function captureActiveTab(commandTab?: chrome.tabs.Tab): Promise<void> {
-  const tab = commandTab?.id
-    ? commandTab
-    : (await chrome.tabs.query({ active: true, currentWindow: true }))[0]
-  if (!tab?.id || tab.windowId === undefined) throw new Error('没有可截图的活动标签页')
-  const imageDataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' })
-  const message: ContentRequest = { type: 'begin-screenshot', imageDataUrl }
-  try {
-    await chrome.tabs.sendMessage(tab.id, message, { frameId: 0 })
-  } catch {
-    await openWorkspace(imageDataUrl)
-  }
-}
-
-async function openWorkspace(imageDataUrl?: string): Promise<void> {
-  let suffix = ''
-  let token: string | undefined
-  if (imageDataUrl) {
-    token = crypto.randomUUID()
-    pendingImages.add(token, imageDataUrl)
-    suffix = `?capture=${encodeURIComponent(token)}`
-  }
-  try {
-    await chrome.tabs.create({ url: chrome.runtime.getURL(`src/workspace/index.html${suffix}`) })
-  } catch (error) {
-    if (token) pendingImages.delete(token)
-    throw error
-  }
-}
+chrome.runtime.onMessage.addListener((message: { type?: string }) => {
+  if (message?.type === 'open-options') void chrome.runtime.openOptionsPage()
+})
 
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name !== PORT_NAME) return
@@ -105,6 +41,7 @@ chrome.runtime.onConnect.addListener((port) => {
   port.onDisconnect.addListener(() => abort.abort())
 
   port.onMessage.addListener((message: TranslateRequest) => {
+    if (message?.type !== 'translate') return
     const emit = (event: TranslateEvent) => {
       try {
         port.postMessage(event)
@@ -114,20 +51,14 @@ chrome.runtime.onConnect.addListener((port) => {
     }
     // translate() 自己会把预期内的失败转成 error 事件；这里兜的是它本身抛出的意外
     // （如读取设置失败），不兜住的话卡片会永远转圈。
-    const task =
-      message?.type === 'translate'
-        ? translateText(message.text, abort.signal, emit)
-        : message?.type === 'translate-image'
-          ? translateImage(message.imageDataUrl, abort.signal, emit)
-          : Promise.resolve()
-    task.catch((error: unknown) => {
+    translate(message.text, abort.signal, emit).catch((error: unknown) => {
       if (abort.signal.aborted) return
       emit({ type: 'error', kind: 'network', detail: describe(error) })
     })
   })
 })
 
-async function translateText(
+async function translate(
   raw: string,
   signal: AbortSignal,
   emit: (event: TranslateEvent) => void,
@@ -155,64 +86,24 @@ async function translateText(
     return
   }
 
-  const outcome = await executeWithRetry(
-    () => attemptTranslate(
-      settings,
-      textChatBody(settings, check.text),
-      false,
-      signal,
-      emit,
-    ),
-    signal,
-  )
-  if (outcome.kind === 'aborted') return
-  if (outcome.kind === 'ok') {
-    // 被掐断的流不进缓存，否则半截译文会一直命中，用户重试也甩不掉。
-    if (outcome.complete) cache.set(cacheKey, outcome.collected)
-    emit({ type: 'done', cached: false })
-    return
-  }
-  emit({ type: 'error', kind: outcome.errorKind, detail: outcome.detail })
-}
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    if (attempt > 0) {
+      await sleep(RETRY_BACKOFF_MS[attempt - 1] ?? 1200, signal)
+      if (signal.aborted) return
+    }
 
-async function translateImage(
-  imageDataUrl: string,
-  signal: AbortSignal,
-  emit: (event: TranslateEvent) => void,
-): Promise<void> {
-  if (!/^data:image\/(?:png|jpeg|webp);base64,/i.test(imageDataUrl)) {
-    emit({ type: 'error', kind: 'image-unsupported' })
+    const outcome = await attemptTranslate(settings, check.text, signal, emit)
+    if (outcome.kind === 'aborted') return
+    if (outcome.kind === 'ok') {
+      // 被掐断的流不进缓存，否则半截译文会一直命中，用户重试也甩不掉。
+      if (outcome.complete) cache.set(cacheKey, outcome.collected)
+      emit({ type: 'done', cached: false })
+      return
+    }
+    if (outcome.retryable && attempt < MAX_ATTEMPTS - 1) continue
+    emit({ type: 'error', kind: outcome.errorKind, detail: outcome.detail })
     return
   }
-  if (imageDataUrl.length > 28_000_000) {
-    emit({ type: 'error', kind: 'image-too-large' })
-    return
-  }
-  const settings = await getSettings()
-  if (!settings.imagePrivacyAccepted) {
-    emit({ type: 'error', kind: 'image-privacy-required' })
-    return
-  }
-  if (settings.apiKey.trim() === '') {
-    emit({ type: 'error', kind: 'no-api-key' })
-    return
-  }
-  const outcome = await executeWithRetry(
-    () => attemptTranslate(
-      settings,
-      imageChatBody(settings, imageDataUrl),
-      true,
-      signal,
-      emit,
-    ),
-    signal,
-  )
-  if (outcome.kind === 'aborted') return
-  if (outcome.kind === 'ok') {
-    emit({ type: 'done', cached: false })
-    return
-  }
-  emit({ type: 'error', kind: outcome.errorKind, detail: outcome.detail })
 }
 
 type Attempt =
@@ -220,31 +111,13 @@ type Attempt =
   | { kind: 'aborted' }
   | { kind: 'failed'; retryable: boolean; errorKind: TranslationErrorKind; detail?: string }
 
-async function executeWithRetry(
-  attempt: () => Promise<Attempt>,
-  signal: AbortSignal,
-): Promise<Attempt> {
-  for (let index = 0; index < MAX_ATTEMPTS; index++) {
-    if (index > 0) {
-      await sleep(RETRY_BACKOFF_MS[index - 1] ?? 1200, signal)
-      if (signal.aborted) return { kind: 'aborted' }
-    }
-    const outcome = await attempt()
-    if (outcome.kind !== 'failed' || !outcome.retryable || index === MAX_ATTEMPTS - 1) {
-      return outcome
-    }
-  }
-  return { kind: 'aborted' }
-}
-
 /**
  * 跑一次完整请求。只有在**还没吐出任何译文**时失败才允许重试 ——
  * 流到一半断掉再重来会让卡片里出现两段译文。
  */
 async function attemptTranslate(
   settings: Settings,
-  body: ChatRequestBody,
-  imageRequest: boolean,
+  text: string,
   signal: AbortSignal,
   emit: (event: TranslateEvent) => void,
 ): Promise<Attempt> {
@@ -257,7 +130,14 @@ async function attemptTranslate(
         'Content-Type': 'application/json',
         Authorization: `Bearer ${settings.apiKey}`,
       },
-      body: JSON.stringify(body),
+      body: JSON.stringify({
+        model: settings.model,
+        stream: true,
+        messages: [
+          { role: 'system', content: SYSTEM_PROMPT },
+          { role: 'user', content: text },
+        ],
+      }),
     })
   } catch (error) {
     if (signal.aborted) return { kind: 'aborted' }
@@ -265,16 +145,16 @@ async function attemptTranslate(
   }
 
   if (!response.ok || !response.body) {
-    const detail = await errorDetail(response)
-    const classified =
-      response.ok && imageRequest
-        ? { kind: 'empty' as const, retryable: false }
-        : classifyHttpError(response.status, detail, imageRequest)
+    const transient = TRANSIENT_STATUS.has(response.status)
     return {
       kind: 'failed',
-      retryable: classified.retryable,
-      errorKind: classified.kind,
-      detail,
+      retryable: transient,
+      errorKind: authFailure(response.status)
+        ? 'auth'
+        : transient
+          ? 'unavailable'
+          : 'network',
+      detail: await errorDetail(response),
     }
   }
 
@@ -283,9 +163,8 @@ async function attemptTranslate(
   const sse = new SseParser()
   const header = new LangHeaderParser()
   const collected: CachedTranslation = { text: '' }
+  let finished = false
   let emitted = false
-  const noTextBuffer = imageRequest ? new NoTextOutputBuffer() : null
-  let sawNoText = false
 
   const push = (chunk: string) => {
     if (chunk === '') return
@@ -294,28 +173,21 @@ async function attemptTranslate(
     emit({ type: 'delta', text: chunk })
   }
 
-  const parseDelta = (chunk: string) => {
-    chunk = noTextBuffer?.feed(chunk) ?? chunk
-    const parsed = header.feed(chunk)
-    if (parsed.header) {
-      collected.source = parsed.header.source
-      collected.target = parsed.header.target
-      emit({ type: 'lang', ...parsed.header })
-    }
-    push(parsed.text)
-  }
-
   try {
     for (;;) {
       const { value, done } = await reader.read()
       if (done) break
       for (const payload of sse.feed(decoder.decode(value, { stream: true }))) {
-        parseDelta(deltaOf(payload))
+        if (finishReasonOf(payload) !== null) finished = true
+        const parsed = header.feed(deltaOf(payload))
+        if (parsed.header) {
+          collected.source = parsed.header.source
+          collected.target = parsed.header.target
+          emit({ type: 'lang', ...parsed.header })
+        }
+        push(parsed.text)
       }
     }
-    const tail = noTextBuffer?.finish()
-    if (tail?.noText) sawNoText = true
-    else parseDelta(tail?.text ?? '')
     push(header.flush())
   } catch (error) {
     if (signal.aborted) return { kind: 'aborted' }
@@ -328,21 +200,11 @@ async function attemptTranslate(
     }
   }
 
-  if (!sse.complete) {
-    return {
-      kind: 'failed',
-      retryable: !emitted,
-      errorKind: 'network',
-      detail: '响应流意外结束',
-    }
+  if (collected.text.trim() === '') {
+    return { kind: 'failed', retryable: !emitted, errorKind: 'empty' }
   }
 
-  const outputError = classifyOutput(sawNoText ? 'NO_TEXT' : collected.text, imageRequest)
-  if (outputError) {
-    return { kind: 'failed', retryable: outputError === 'empty' && !emitted, errorKind: outputError }
-  }
-
-  return { kind: 'ok', collected, complete: true }
+  return { kind: 'ok', collected, complete: sse.sawDone || finished }
 }
 
 function sleep(ms: number, signal: AbortSignal): Promise<void> {
@@ -357,6 +219,10 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
       { once: true },
     )
   })
+}
+
+function authFailure(status: number): boolean {
+  return status === 401 || status === 403
 }
 
 async function errorDetail(response: Response): Promise<string> {

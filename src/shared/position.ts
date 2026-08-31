@@ -20,14 +20,6 @@ export type AnchorOptions = {
   margin?: number
 }
 
-export type ConstrainOptions = {
-  left: number
-  top: number
-  size: Size
-  viewport: Viewport
-  margin?: number
-}
-
 /**
  * 把一个浮层放到锚点的右下方；贴到视口边缘时翻转到左侧/上方。
  * 返回的是视口坐标（fixed 定位可直接用）。
@@ -58,20 +50,6 @@ export function anchorBottomRight({
     top: clamp(top, margin, Math.max(margin, viewport.height - size.height - margin)),
     flippedX,
     flippedY,
-  }
-}
-
-/** 把一个 fixed 元素的左上角约束在可见视口内。 */
-export function constrainToViewport({
-  left,
-  top,
-  size,
-  viewport,
-  margin = 8,
-}: ConstrainOptions): { left: number; top: number } {
-  return {
-    left: clamp(left, margin, Math.max(margin, viewport.width - size.width - margin)),
-    top: clamp(top, margin, Math.max(margin, viewport.height - size.height - margin)),
   }
 }
 

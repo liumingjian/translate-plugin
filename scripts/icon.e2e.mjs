@@ -3,9 +3,15 @@
  * 用法：node scripts/icon.e2e.mjs（不需要 api-key，先 pnpm build）
  * 每个场景输出一行 JSON，visible=false 即回归。
  */
-import assert from 'node:assert/strict'
 import http from 'node:http'
-import { closeServer, launchExtension, listen } from './e2e/harness.mjs'
+import { fileURLToPath } from 'node:url'
+import path from 'node:path'
+import puppeteer from 'puppeteer-core'
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+const DIST = path.join(ROOT, 'dist')
+const CHROME =
+  process.env.TP_CHROME ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
 
 const FRAME = `<!doctype html><html lang="en"><head><meta charset="utf-8"></head>
 <body style="font:16px/1.7 sans-serif;margin:8px">
@@ -47,8 +53,16 @@ const server = http.createServer((req, res) => {
   const origin = `http://localhost:${server.address().port}/`
   serve(req.url === '/frame' ? FRAME : page(origin))(req, res)
 })
-const origin = `${await listen(server)}/`
-const { browser } = await launchExtension()
+await new Promise((r) => server.listen(0, '127.0.0.1', r))
+const origin = `http://127.0.0.1:${server.address().port}/`
+
+const browser = await puppeteer.launch({
+  executablePath: CHROME,
+  headless: process.env.TP_HEADLESS === '0' ? false : true,
+  pipe: true,
+  ignoreDefaultArgs: ['--disable-extensions'],
+  args: ['--enable-unsafe-extension-debugging', '--no-first-run', '--no-default-browser-check'],
+})
 
 /** 每个框架各有一套浮层，探针得指定在哪个框架里找。 */
 const PROBE = () => {
@@ -59,11 +73,13 @@ const PROBE = () => {
   const icon = host.shadowRoot.querySelector('.icon')
   const card = host.shadowRoot.querySelector('.card')
   const r = icon.getBoundingClientRect()
+  const sel = getSelection()
   return {
     visible: !icon.classList.contains('hidden'),
     rect: { x: Math.round(r.x), y: Math.round(r.y) },
     inView: r.x >= 0 && r.y >= 0 && r.x < innerWidth && r.y < innerHeight,
     cardVisible: !card.classList.contains('hidden'),
+    sel: String(sel).slice(0, 30),
     active: (() => {
       let el = document.activeElement
       while (el?.shadowRoot?.activeElement) el = el.shadowRoot.activeElement
@@ -74,6 +90,8 @@ const PROBE = () => {
 }
 
 try {
+  const cdp = await browser.target().createCDPSession()
+  await cdp.send('Extensions.loadUnpacked', { path: DIST })
   await sleep(2000)
   const tab = await browser.newPage()
   await tab.setViewport({ width: 1100, height: 800 })
@@ -122,18 +140,11 @@ try {
     await sleep(700)
   }
 
-  const scenario = async (
-    name,
-    frameId,
-    fn,
-    verify = (state) => state.visible && state.inView,
-  ) => {
+  const scenario = async (name, frameId, fn) => {
     await clear()
     const { frame, offset } = await frameOf(frameId)
     await fn({ frame, offset })
-    const state = await probe(frame)
-    assert(verify(state), `${name} did not reach its expected visible state`)
-    log({ scenario: name, ...state })
+    log({ scenario: name, ...(await probe(frame)) })
   }
 
   const dragScenario = (name, frameId, selector, dy) =>
@@ -150,35 +161,25 @@ try {
   await dragScenario('iframe-srcdoc', 'srcdoc', '#fp')
 
   // 点开卡片：iframe 里的卡片被框架视口夹住，但至少得开出来。
-  await scenario(
-    'iframe-card-opens',
-    'cross',
-    async ({ frame, offset }) => {
-      await drag(await boxIn(frame, '#fp'), offset)
-      const before = await probe(frame)
-      if (!before.visible) return
-      await tab.mouse.click(offset.x + before.rect.x + 14, offset.y + before.rect.y + 14)
-      await sleep(800)
-    },
-    (state) => state.cardVisible,
-  )
+  await scenario('iframe-card-opens', 'cross', async ({ frame, offset }) => {
+    await drag(await boxIn(frame, '#fp'), offset)
+    const before = await probe(frame)
+    if (!before.visible) return
+    await tab.mouse.click(offset.x + before.rect.x + 14, offset.y + before.rect.y + 14)
+    await sleep(800)
+  })
 
   // 点回主文档时，子框架的卡片该自己收掉（它收不到主文档的 mousedown）。
-  await scenario(
-    'iframe-card-dismissed-from-parent',
-    'cross',
-    async ({ frame, offset }) => {
-      await drag(await boxIn(frame, '#fp'), offset)
-      const before = await probe(frame)
-      if (before.visible) {
-        await tab.mouse.click(offset.x + before.rect.x + 14, offset.y + before.rect.y + 14)
-        await sleep(800)
-      }
-      await tab.mouse.click(600, 60)
-      await sleep(500)
-    },
-    (state) => !state.cardVisible,
-  )
+  await scenario('iframe-card-dismissed-from-parent', 'cross', async ({ frame, offset }) => {
+    await drag(await boxIn(frame, '#fp'), offset)
+    const before = await probe(frame)
+    if (before.visible) {
+      await tab.mouse.click(offset.x + before.rect.x + 14, offset.y + before.rect.y + 14)
+      await sleep(800)
+    }
+    await tab.mouse.click(600, 60)
+    await sleep(500)
+  })
 
   await scenario('second-selection-after-card', null, async ({ frame, offset }) => {
     await drag(await boxIn(frame, '#en'), offset)
@@ -225,5 +226,5 @@ try {
   })
 } finally {
   await browser.close()
-  await closeServer(server)
+  server.close()
 }

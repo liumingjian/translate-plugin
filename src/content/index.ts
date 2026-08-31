@@ -1,14 +1,8 @@
-import { cropImageDataUrl } from '../shared/image'
 import type { Rect } from '../shared/position'
 import { checkSelection } from '../shared/selection'
-import { getSettings, saveSettings } from '../shared/settings'
-import { TranslationClient } from '../shared/translationClient'
 import { PORT_NAME } from '../shared/types'
-import type { ContentRequest, TranslateEvent } from '../shared/types'
+import type { TranslateEvent } from '../shared/types'
 import { Overlay } from './overlay'
-import { ScreenshotMode } from './screenshotMode'
-import type { ConfirmedScreenshot } from './screenshotMode'
-import { ScreenshotCard } from './screenshotCard'
 import { readSelection } from './selectionSource'
 
 /** 当前选区的锚点求值器 —— 每次滚动都重新问一次，图标才跟得住。 */
@@ -18,11 +12,6 @@ let tooLong = false
 let activePort: chrome.runtime.Port | null = null
 /** 是否有一次翻译还在流式进行中 —— 用来区分「用户主动关」和「端口意外断」。 */
 let streaming = false
-const screenshotClient = new TranslationClient()
-let screenshotRevision = 0
-let currentScreenshot: ConfirmedScreenshot | null = null
-let currentScreenshotCrop: string | null = null
-let screenshotStartRevision = 0
 
 const overlay = new Overlay({
   onIconClick: () => {
@@ -48,41 +37,6 @@ const overlay = new Overlay({
     closePort()
   },
 })
-
-const screenshotCard = window === window.top
-  ? new ScreenshotCard({
-      onClose: () => {
-        screenshotRevision++
-        screenshotClient.cancel()
-        currentScreenshot = null
-        currentScreenshotCrop = null
-      },
-      onRetry: retryScreenshot,
-      onReselect: reselectScreenshot,
-      onOpenOptions: (imageModel) => {
-        const type = imageModel ? 'open-image-model-settings' : 'open-options'
-        void chrome.runtime.sendMessage({ type }).catch(() => {})
-      },
-    })
-  : null
-
-const screenshotMode = window === window.top
-  ? new ScreenshotMode({
-      onConfirm: (screenshot) => void confirmScreenshot(screenshot),
-      onAcceptPrivacy: async () => {
-        const settings = await getSettings()
-        await saveSettings({ ...settings, imagePrivacyAccepted: true })
-        return true
-      },
-    })
-  : null
-
-if (window === window.top) {
-  chrome.runtime.onMessage.addListener((message: ContentRequest) => {
-    if (message?.type !== 'begin-screenshot') return
-    void beginScreenshot(message.imageDataUrl)
-  })
-}
 
 document.addEventListener('mouseup', (event) => {
   if (overlay.contains(event.target)) return
@@ -135,91 +89,6 @@ function dismiss(): void {
   overlay.hideIcon()
   overlay.hideCard()
   closePort()
-}
-
-async function beginScreenshot(imageDataUrl: string): Promise<void> {
-  if (!screenshotMode) return
-  const startRevision = ++screenshotStartRevision
-  const settings = await getSettings()
-  if (startRevision !== screenshotStartRevision) return
-  dismiss()
-  screenshotCard?.close()
-  screenshotClient.cancel()
-  screenshotRevision++
-  currentScreenshot = null
-  currentScreenshotCrop = null
-  screenshotMode.begin(imageDataUrl, settings.imagePrivacyAccepted)
-}
-
-async function confirmScreenshot(screenshot: ConfirmedScreenshot): Promise<void> {
-  const revision = ++screenshotRevision
-  currentScreenshot = screenshot
-  currentScreenshotCrop = null
-  const anchor: Rect = {
-    left: screenshot.rect.x,
-    top: screenshot.rect.y,
-    right: screenshot.rect.x + screenshot.rect.width,
-    bottom: screenshot.rect.y + screenshot.rect.height,
-  }
-  let cropped: string
-  try {
-    cropped = await cropImageDataUrl(screenshot.imageDataUrl, screenshot.rect, screenshot.viewport)
-  } catch {
-    if (revision !== screenshotRevision) return
-    screenshotCard?.open(screenshot.imageDataUrl, anchor)
-    screenshotCard?.showError('image-unsupported', '无法处理框选区域')
-    return
-  }
-  if (revision !== screenshotRevision) return
-  currentScreenshotCrop = cropped
-  screenshotCard?.open(cropped, anchor)
-  startScreenshotTranslation(cropped)
-}
-
-function startScreenshotTranslation(cropped: string): void {
-  const revision = ++screenshotRevision
-  screenshotCard?.setLoading()
-  screenshotClient.start(
-    { type: 'translate-image', imageDataUrl: cropped },
-    {
-      onEvent: (event) => {
-        if (revision !== screenshotRevision) return
-        switch (event.type) {
-          case 'lang':
-            screenshotCard?.setLang(event.source, event.target)
-            break
-          case 'delta':
-            screenshotCard?.appendDelta(event.text)
-            break
-          case 'done':
-            screenshotCard?.finish()
-            screenshotClient.finish()
-            break
-          case 'error':
-            screenshotCard?.showError(event.kind, event.detail)
-            screenshotClient.finish()
-            break
-        }
-      },
-      onDisconnect: () => {
-        if (revision === screenshotRevision) {
-          screenshotCard?.showError('network', '连接中断，请重试')
-        }
-      },
-    },
-  )
-}
-
-function retryScreenshot(): void {
-  if (!currentScreenshotCrop) return
-  startScreenshotTranslation(currentScreenshotCrop)
-}
-
-function reselectScreenshot(): void {
-  if (!currentScreenshot || !screenshotMode) return
-  const frozenImage = currentScreenshot.imageDataUrl
-  screenshotCard?.close()
-  screenshotMode.begin(frozenImage)
 }
 
 const follow = throttleToFrame(() => {

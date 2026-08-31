@@ -9,38 +9,31 @@ export const STYLES = `
 
 * {
   box-sizing: border-box;
-  font-family: "SF Pro Text", system-ui, -apple-system, BlinkMacSystemFont,
-    "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
-  letter-spacing: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+    'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
 }
 
 :host {
   --tp-bg: #ffffff;
-  --tp-block: #fafafc;
-  --tp-fg: #1d1d1f;
-  --tp-muted: #6e6e73;
-  --tp-border: #e0e0e0;
-  --tp-accent: #0066cc;
-  --tp-primary: #0066cc;
-  --tp-primary-hover: #0071e3;
-  --tp-focus: #0071e3;
-  --tp-on-primary: #ffffff;
-  --tp-danger: #c62828;
+  --tp-block: #f1f2f4;
+  --tp-fg: #1a1a1a;
+  --tp-muted: #6b7280;
+  --tp-border: rgba(0, 0, 0, 0.08);
+  --tp-shadow: 0 8px 32px rgba(0, 0, 0, 0.16);
+  --tp-accent: #2563eb;
+  --tp-danger: #dc2626;
 }
 
 @media (prefers-color-scheme: dark) {
   :host {
-    --tp-bg: #272729;
-    --tp-block: #2a2a2c;
-    --tp-fg: #ffffff;
-    --tp-muted: #cccccc;
-    --tp-border: #454547;
-    --tp-accent: #2997ff;
-    --tp-primary: #0066cc;
-    --tp-primary-hover: #0071e3;
-    --tp-focus: #0071e3;
-    --tp-on-primary: #ffffff;
-    --tp-danger: #ff8a80;
+    --tp-bg: #1f2023;
+    --tp-block: #2a2c31;
+    --tp-fg: #e8eaed;
+    --tp-muted: #9aa0a6;
+    --tp-border: rgba(255, 255, 255, 0.1);
+    --tp-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+    --tp-accent: #60a5fa;
+    --tp-danger: #f87171;
   }
 }
 
@@ -58,6 +51,7 @@ export const STYLES = `
   font-size: 14px;
   line-height: 1;
   cursor: pointer;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
   user-select: none;
   padding: 0;
 }
@@ -75,9 +69,10 @@ export const STYLES = `
   flex-direction: column;
   gap: 8px;
   border: 1px solid var(--tp-border);
-  border-radius: 8px;
+  border-radius: 12px;
   background: var(--tp-bg);
   color: var(--tp-fg);
+  box-shadow: var(--tp-shadow);
   font-size: 14px;
   line-height: 1.6;
 }
@@ -91,16 +86,14 @@ export const STYLES = `
 }
 
 .close {
-  width: 44px;
-  height: 44px;
   border: none;
-  border-radius: 50%;
   background: transparent;
   color: var(--tp-muted);
   font-size: 16px;
   line-height: 1;
   cursor: pointer;
-  padding: 0;
+  padding: 2px 4px;
+  border-radius: 4px;
 }
 
 .close:hover {
@@ -110,7 +103,6 @@ export const STYLES = `
 
 .block {
   padding: 10px 12px;
-  border: 1px solid var(--tp-border);
   border-radius: 8px;
   background: var(--tp-block);
   white-space: pre-wrap;
@@ -146,39 +138,29 @@ export const STYLES = `
 }
 
 .action {
-  min-height: 44px;
   border: 1px solid var(--tp-border);
   background: transparent;
-  color: var(--tp-accent);
+  color: var(--tp-muted);
   font-size: 12px;
   padding: 4px 10px;
-  border-radius: 9999px;
+  border-radius: 6px;
   cursor: pointer;
 }
 
 .action:hover {
+  color: var(--tp-fg);
   background: var(--tp-block);
 }
 
 .action.primary {
-  color: var(--tp-on-primary);
-  background: var(--tp-primary);
-  border-color: var(--tp-primary);
+  color: #fff;
+  background: var(--tp-accent);
+  border-color: transparent;
 }
 
 .action.primary:hover {
-  background: var(--tp-primary-hover);
-  border-color: var(--tp-primary-hover);
-  color: var(--tp-on-primary);
-}
-
-button:active:not(:disabled) {
-  transform: scale(0.95);
-}
-
-button:focus-visible {
-  outline: 3px solid var(--tp-focus);
-  outline-offset: 2px;
+  opacity: 0.9;
+  color: #fff;
 }
 
 .error {
