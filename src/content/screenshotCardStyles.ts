@@ -4,7 +4,7 @@ export const SCREENSHOT_CARD_STYLES = `
   --tp-bg: #ffffff;
   --tp-block: #fafafc;
   --tp-fg: #1d1d1f;
-  --tp-muted: #7a7a7a;
+  --tp-muted: #6e6e73;
   --tp-border: #e0e0e0;
   --tp-accent: #0066cc;
   --tp-primary: #0066cc;

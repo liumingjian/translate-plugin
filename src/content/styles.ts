@@ -18,7 +18,7 @@ export const STYLES = `
   --tp-bg: #ffffff;
   --tp-block: #fafafc;
   --tp-fg: #1d1d1f;
-  --tp-muted: #7a7a7a;
+  --tp-muted: #6e6e73;
   --tp-border: #e0e0e0;
   --tp-accent: #0066cc;
   --tp-primary: #0066cc;
@@ -46,8 +46,8 @@ export const STYLES = `
 
 .icon {
   position: fixed;
-  width: 44px;
-  height: 44px;
+  width: 28px;
+  height: 28px;
   display: flex;
   align-items: center;
   justify-content: center;

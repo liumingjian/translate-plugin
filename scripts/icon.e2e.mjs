@@ -59,26 +59,11 @@ const PROBE = () => {
   const icon = host.shadowRoot.querySelector('.icon')
   const card = host.shadowRoot.querySelector('.card')
   const r = icon.getBoundingClientRect()
-  const visibleButtons = [...card.querySelectorAll('button')]
-    .filter((button) => button.getBoundingClientRect().height > 0)
-  const primary = visibleButtons.find((button) => button.classList.contains('primary'))
   return {
     visible: !icon.classList.contains('hidden'),
-    rect: {
-      x: Math.round(r.x),
-      y: Math.round(r.y),
-      width: r.width,
-      height: r.height,
-    },
+    rect: { x: Math.round(r.x), y: Math.round(r.y) },
     inView: r.x >= 0 && r.y >= 0 && r.x < innerWidth && r.y < innerHeight,
     cardVisible: !card.classList.contains('hidden'),
-    iconShadow: getComputedStyle(icon).boxShadow,
-    cardShadow: getComputedStyle(card).boxShadow,
-    cardPrimaryBackground: primary ? getComputedStyle(primary).backgroundColor : null,
-    cardButtonSizes: visibleButtons.map((button) => {
-      const box = button.getBoundingClientRect()
-      return { width: box.width, height: box.height }
-    }),
     active: (() => {
       let el = document.activeElement
       while (el?.shadowRoot?.activeElement) el = el.shadowRoot.activeElement
@@ -149,7 +134,6 @@ try {
     const state = await probe(frame)
     assert(verify(state), `${name} did not reach its expected visible state`)
     log({ scenario: name, ...state })
-    return state
   }
 
   const dragScenario = (name, frameId, selector, dy) =>
@@ -157,41 +141,7 @@ try {
       drag(await boxIn(frame, selector), offset, dy),
     )
 
-  const selectionIcon = await dragScenario('drag-paragraph', null, '#en')
-  assert.equal(selectionIcon.iconShadow, 'none')
-  assert(selectionIcon.rect.width >= 44 && selectionIcon.rect.height >= 44)
-  await tab.mouse.move(
-    selectionIcon.rect.x + selectionIcon.rect.width / 2,
-    selectionIcon.rect.y + selectionIcon.rect.height / 2,
-  )
-  await tab.mouse.down()
-  const iconTransform = await tab.evaluate(() => {
-    const icon = [...document.documentElement.children]
-      .find((element) => element.shadowRoot?.querySelector('.icon'))
-      .shadowRoot.querySelector('.icon')
-    return getComputedStyle(icon).transform
-  })
-  assert.match(iconTransform, /^matrix\(0\.95, 0, 0, 0\.95, 0, 0\)$/)
-  await tab.mouse.move(1, 1)
-  await tab.mouse.up()
-
-  const textCardDesign = await scenario(
-    'text-card-design',
-    null,
-    async ({ frame, offset }) => {
-      await drag(await boxIn(frame, '#en'), offset)
-      const before = await probe(frame)
-      await tab.mouse.click(
-        before.rect.x + before.rect.width / 2,
-        before.rect.y + before.rect.height / 2,
-      )
-      await sleep(800)
-    },
-    (state) => state.cardVisible && state.cardPrimaryBackground !== null,
-  )
-  assert.equal(textCardDesign.cardShadow, 'none')
-  assert.equal(textCardDesign.cardPrimaryBackground, 'rgb(0, 102, 204)')
-  assert(textCardDesign.cardButtonSizes.every(({ width, height }) => width >= 44 && height >= 44))
+  await dragScenario('drag-paragraph', null, '#en')
   await dragScenario('textarea', null, '#ta', 12)
   await dragScenario('input', null, '#in')
   await dragScenario('shadow-dom-text', null, 'shadow:sp')

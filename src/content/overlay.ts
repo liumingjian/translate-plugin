@@ -80,7 +80,7 @@ export class Overlay {
 
   showIcon(anchor: Rect): void {
     this.icon.classList.remove('hidden')
-    this.place(this.icon, anchor, { width: 44, height: 44 })
+    this.place(this.icon, anchor, { width: 28, height: 28 })
   }
 
   hideIcon(): void {
@@ -138,7 +138,6 @@ export class Overlay {
 
   finish(): void {
     if (this.resultText.className === 'dots') this.resultText.className = ''
-    this.retryButton.classList.remove('primary')
     this.copyButton.classList.remove('hidden')
     this.retryButton.classList.remove('hidden')
     this.refit()
@@ -164,7 +163,6 @@ export class Overlay {
     this.resultText.textContent = detail ? `${spec.message}：${detail}` : spec.message
     this.copyButton.classList.add('hidden')
     this.retryButton.classList.toggle('hidden', !spec.retry)
-    this.retryButton.classList.toggle('primary', spec.retry && !spec.options)
     this.optionsButton.classList.toggle('hidden', !spec.options)
     this.refit()
   }
@@ -207,7 +205,7 @@ export class Overlay {
     this.resultBlock.append(this.resultText)
 
     this.actions.className = 'actions'
-    this.copyButton.className = 'action primary hidden'
+    this.copyButton.className = 'action hidden'
     this.copyButton.type = 'button'
     this.copyButton.textContent = '复制译文'
     this.copyButton.addEventListener('click', () => void this.copyResult())

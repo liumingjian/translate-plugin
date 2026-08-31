@@ -2,7 +2,7 @@
   color-scheme: light dark;
   --bg: #ffffff;
   --fg: #1d1d1f;
-  --muted: #7a7a7a;
+  --muted: #6e6e73;
   --border: #e0e0e0;
   --hover: #f5f5f7;
   --accent: #0066cc;
@@ -95,6 +95,6 @@ strong,
 small { display: block; letter-spacing: 0; overflow-wrap: anywhere; }
 strong { font-size: 14px; font-weight: 600; }
 small { margin-top: 2px; color: var(--muted); font-size: 12px; }
-.primary small { color: rgba(255, 255, 255, 0.82); }
+.primary small { color: var(--on-accent); }
 .status { min-height: 0; margin: 6px 12px 2px 48px; color: var(--danger); font-size: 12px; }
 .status:empty { display: none; }

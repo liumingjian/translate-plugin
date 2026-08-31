@@ -4,7 +4,7 @@
   --surface: #ffffff;
   --surface-alt: #fafafc;
   --fg: #1d1d1f;
-  --muted: #7a7a7a;
+  --muted: #6e6e73;
   --border: #e0e0e0;
   --accent: #0066cc;
   --accent-hover: #0071e3;
@@ -17,7 +17,7 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #000000;
+    --bg: #252527;
     --surface: #272729;
     --surface-alt: #2a2a2c;
     --fg: #ffffff;
@@ -37,6 +37,7 @@
 
 body {
   min-width: 0;
+  min-height: 100dvh;
   margin: 0;
   padding: 48px 24px;
   background: var(--bg);

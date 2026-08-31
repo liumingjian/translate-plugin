@@ -127,8 +127,6 @@ export class ScreenshotCard {
 
   finish(): void {
     this.result.classList.remove('dots')
-    this.copyButton.classList.add('primary')
-    this.reselectButton.classList.remove('primary')
     this.copyButton.classList.remove('hidden')
     this.reselectButton.classList.remove('hidden')
     this.card.setAttribute('aria-busy', 'false')
@@ -141,15 +139,13 @@ export class ScreenshotCard {
     this.error.textContent = detail ? `${message}：${detail}` : message
     this.error.classList.remove('hidden')
     this.copyButton.classList.toggle('hidden', this.result.textContent === '')
-    const retryable = kind === 'network' || kind === 'unavailable' || kind === 'empty'
-    this.retryButton.classList.toggle('hidden', !retryable)
-    this.retryButton.classList.toggle('primary', retryable)
-    this.copyButton.classList.toggle('primary', !retryable)
+    this.retryButton.classList.toggle(
+      'hidden',
+      kind !== 'network' && kind !== 'unavailable' && kind !== 'empty',
+    )
     this.reselectButton.classList.remove('hidden')
     const settingsError = kind === 'no-api-key' || kind === 'auth' || kind === 'image-unsupported'
-    this.reselectButton.classList.toggle('primary', !retryable && !settingsError)
     this.optionsButton.classList.toggle('hidden', !settingsError)
-    this.optionsButton.classList.toggle('primary', settingsError)
     this.optionsButton.textContent = kind === 'image-unsupported' ? '配置截图模型' : '打开配置页'
     this.optionsButton.dataset.imageModel = String(kind === 'image-unsupported')
     this.card.setAttribute('aria-busy', 'false')
@@ -207,7 +203,7 @@ export class ScreenshotCard {
     this.optionsButton.addEventListener('click', () => {
       this.handlers.onOpenOptions(this.optionsButton.dataset.imageModel === 'true')
     })
-    this.copyButton.className = 'primary hidden'
+    this.copyButton.className = 'hidden'
     this.copyButton.type = 'button'
     this.copyButton.textContent = '复制译文'
     this.copyButton.addEventListener('click', () => void this.copyResult())

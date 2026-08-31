@@ -36,7 +36,7 @@ const SCREENSHOT_STYLES = `
   --tp-on-dark: #ffffff;
   --tp-dark-surface: #272729;
   --tp-dark-border: #454547;
-  --tp-muted: #7a7a7a;
+  --tp-muted: #cccccc;
 }
 * {
   box-sizing: border-box;
@@ -101,7 +101,7 @@ const SCREENSHOT_STYLES = `
   left: 50%;
   bottom: 24px;
   transform: translateX(-50%);
-  width: min(420px, calc(100vw - 16px));
+  width: min(560px, calc(100vw - 16px));
   padding: 10px 12px;
   display: flex;
   align-items: center;
@@ -119,6 +119,7 @@ const SCREENSHOT_STYLES = `
   white-space: nowrap;
 }
 button {
+  flex: 0 0 auto;
   min-height: 44px;
   padding: 5px 13px;
   border: 1px solid var(--tp-muted);
@@ -126,6 +127,7 @@ button {
   background: transparent;
   color: var(--tp-on-dark);
   font-size: 13px;
+  white-space: nowrap;
   cursor: pointer;
 }
 button:hover:not(:disabled) { background: var(--tp-dark-surface); }

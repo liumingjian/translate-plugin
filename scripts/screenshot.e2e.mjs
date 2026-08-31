@@ -166,6 +166,11 @@ try {
 
   await drag(page, 110, 150, 270, 290)
   assert.equal(await screenshotState(page), 'adjusting-selection')
+  const selectedToolbar = await screenshotToolbarLayout(page)
+  assert(
+    selectedToolbar.textLines.every((lines) => lines === 1),
+    'screenshot toolbar button labels must stay on one line after selecting an area',
+  )
   let selection = await screenshotSelection(page)
   assert.deepEqual(selection, { left: 110, top: 150, width: 160, height: 140 })
   const handleDesign = await screenshotHandleDesign(page)
@@ -246,7 +251,6 @@ try {
   assert.equal(await screenshotCardFocusedName(page), '关闭截图翻译')
   const cardDesign = await screenshotCardDesign(page)
   assert.equal(cardDesign.shadow, 'none')
-  assert.equal(cardDesign.primaryBackground, 'rgb(0, 102, 204)')
   assert(cardDesign.buttonSizes.every(isMinimumTarget), 'screenshot card buttons must be 44px targets')
 
   await waitForRequestCount(1)
@@ -374,6 +378,15 @@ try {
   assert((await screenshotCardContrast(page)) >= 4.5, 'dark card text must keep readable contrast')
   await page.keyboard.press('Escape')
   await page.waitForFunction(() => !window.__findTranslationCard())
+  await beginScreenshot(browser, worker, extensionOrigin, page)
+  const narrowToolbar = await screenshotToolbarLayout(page)
+  assertCardInViewport(narrowToolbar.rect, { width: 320, height: 480 })
+  assert(
+    narrowToolbar.textLines.every((lines) => lines === 1),
+    'narrow screenshot toolbar button labels must stay on one line',
+  )
+  await page.keyboard.press('Escape')
+  await page.waitForFunction(() => !window.__findScreenshotDialog())
   await page.emulateMediaFeatures([{ name: 'prefers-color-scheme', value: 'light' }])
   await page.setViewport({ width: 900, height: 700, deviceScaleFactor: 2 })
 
@@ -722,6 +735,28 @@ async function screenshotModeDesign(page, selector) {
   }, selector)
 }
 
+async function screenshotToolbarLayout(page) {
+  return page.evaluate(() => {
+    const toolbar = window.__findScreenshotDialog().querySelector('.toolbar')
+    const toolbarRect = toolbar.getBoundingClientRect()
+    const buttons = [...toolbar.querySelectorAll('button')]
+    const textLines = buttons.map((button) => {
+      const range = document.createRange()
+      range.selectNodeContents(button)
+      return new Set([...range.getClientRects()].map((rect) => Math.round(rect.top))).size
+    })
+    return {
+      rect: {
+        left: toolbarRect.left,
+        top: toolbarRect.top,
+        right: toolbarRect.right,
+        bottom: toolbarRect.bottom,
+      },
+      textLines,
+    }
+  })
+}
+
 async function shadowButtonDisabled(page, label) {
   return page.evaluate((text) => {
     const button = [...window.__findScreenshotDialog().querySelectorAll('button')]
@@ -808,10 +843,8 @@ async function pressCardButton(page, label) {
 async function screenshotCardDesign(page) {
   return page.evaluate(() => {
     const card = window.__findScreenshotCard()
-    const primary = card.querySelector('button.primary:not(.hidden)')
     return {
       shadow: getComputedStyle(card).boxShadow,
-      primaryBackground: getComputedStyle(primary).backgroundColor,
       buttonSizes: [...card.querySelectorAll('button')]
         .filter((button) => button.getBoundingClientRect().height > 0)
         .map((button) => {
