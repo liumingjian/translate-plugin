@@ -8,8 +8,13 @@
     "build": "tsc --noEmit && vite build",
     "test": "vitest run",
     "test:watch": "vitest",
-    "e2e": "node scripts/e2e.mjs",
-    "e2e:icon": "node scripts/icon.e2e.mjs"
+    "e2e": "vite build --mode e2e && node scripts/e2e.mjs",
+    "e2e:deterministic": "vite build --mode e2e && node scripts/e2e.mjs && node scripts/screenshot.e2e.mjs && node scripts/workspace.e2e.mjs && node scripts/lifecycle.e2e.mjs && node scripts/icon.e2e.mjs",
+    "e2e:real": "vite build --mode e2e && node scripts/real.e2e.mjs",
+    "e2e:icon": "node scripts/icon.e2e.mjs",
+    "e2e:screenshot": "vite build --mode e2e && node scripts/screenshot.e2e.mjs",
+    "e2e:lifecycle": "vite build --mode e2e && node scripts/lifecycle.e2e.mjs",
+    "e2e:workspace": "vite build --mode e2e && node scripts/workspace.e2e.mjs"
   },
   "devDependencies": {
     "@crxjs/vite-plugin": "^2.0.0-beta.28",
