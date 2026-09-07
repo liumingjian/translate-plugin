@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>截图框选操作组原型</title>
+    <link rel="stylesheet" href="styles.css" />
+    <script src="prototype.js" defer></script>
+  </head>
+  <body>
+    <!-- Three variants of post-selection controls, switchable via ?variant=. -->
+    <main id="prototype" class="prototype" data-variant="A" data-mode="waiting">
+      <div class="capture">
+        <div class="reference-crop">
+          <img src="reference.png" alt="用于测试截图框选控件的文章页面" draggable="false" />
+        </div>
+      </div>
+
+      <div id="surface" class="surface" aria-label="截图翻译框选" tabindex="0">
+        <div id="selection" class="selection" role="group" tabindex="0">
+          <button class="handle handle-nw" data-handle="nw" aria-label="调整左上角"></button>
+          <button class="handle handle-n" data-handle="n" aria-label="调整上边缘"></button>
+          <button class="handle handle-ne" data-handle="ne" aria-label="调整右上角"></button>
+          <button class="handle handle-e" data-handle="e" aria-label="调整右边缘"></button>
+          <button class="handle handle-se" data-handle="se" aria-label="调整右下角"></button>
+          <button class="handle handle-s" data-handle="s" aria-label="调整下边缘"></button>
+          <button class="handle handle-sw" data-handle="sw" aria-label="调整左下角"></button>
+          <button class="handle handle-w" data-handle="w" aria-label="调整左边缘"></button>
+        </div>
+
+        <div id="controls" class="control-cluster" aria-hidden="true">
+          <button id="cancel" class="control-button cancel" type="button" aria-label="取消截图">
+            <span aria-hidden="true">×</span>
+          </button>
+          <button id="confirm" class="control-button confirm" type="button" aria-label="确认截图">
+            <span aria-hidden="true">✓</span>
+          </button>
+        </div>
+      </div>
+
+      <nav class="prototype-switcher" aria-label="原型版本切换">
+        <button id="previousVariant" type="button" aria-label="上一个原型">‹</button>
+        <span id="variantLabel">A 外沿双圆</span>
+        <button id="nextVariant" type="button" aria-label="下一个原型">›</button>
+      </nav>
+    </main>
+  </body>
+</html>
