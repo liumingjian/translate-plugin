@@ -14,9 +14,7 @@ export default defineManifest(({ mode }) => ({
   },
   permissions: ['storage', 'activeTab'],
   optional_permissions: ['clipboardRead'],
-  // 默认翻译服务的域名静态声明；用户自定义 base_url 时走 optional 运行时申请。
   host_permissions: [
-    'https://api.vipsyfw.com/*',
     // chrome.action.openPopup() 不会像真实工具栏点击一样授予 activeTab；测试构建
     // captureVisibleTab 只接受 activeTab 或 <all_urls>；测试构建还需访问本地服务。
     // 生产构建不含这两项，仍只依赖用户点击产生的 activeTab 授权。

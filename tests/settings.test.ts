@@ -37,6 +37,7 @@ describe('settings migration', () => {
 
   it('uses all defaults when there are no stored settings', () => {
     expect(migrateSettings(undefined)).toEqual(DEFAULT_SETTINGS)
+    expect(DEFAULT_SETTINGS.baseUrl).toBe('')
   })
 
   it.each(['', '   '])('falls back to the default image model for %j', (imageModel) => {

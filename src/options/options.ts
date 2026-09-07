@@ -1,4 +1,3 @@
-import { DEFAULT_BASE_URL } from '../shared/constants'
 import {
   DEFAULT_SETTINGS,
   getSettings,
@@ -27,7 +26,7 @@ void (async () => {
 })()
 
 saveButton.addEventListener('click', () => {
-  const baseUrl = normalizeBaseUrl(baseUrlInput.value) || DEFAULT_BASE_URL
+  const baseUrl = normalizeBaseUrl(baseUrlInput.value)
   const checked = checkOrigin(baseUrl)
   if (!checked.ok) {
     report(checked.message, 'error')
@@ -60,7 +59,7 @@ shortcutsButton.addEventListener('click', () => {
 })
 
 fetchButton.addEventListener('click', () => {
-  const baseUrl = normalizeBaseUrl(baseUrlInput.value) || DEFAULT_BASE_URL
+  const baseUrl = normalizeBaseUrl(baseUrlInput.value)
   const checked = checkOrigin(baseUrl)
   if (!checked.ok) {
     report(checked.message, 'error')
@@ -150,18 +149,8 @@ function checkOrigin(baseUrl: string): OriginCheck {
   return { ok: true, origin: url.origin }
 }
 
-/** 默认服务已经在 host_permissions 里，不必再问一次。 */
 function requestOrigin(origin: string): Promise<boolean> {
-  if (origin === originOf(DEFAULT_BASE_URL)) return Promise.resolve(true)
   return chrome.permissions.request({ origins: [`${origin}/*`] }).catch(() => false)
-}
-
-function originOf(url: string): string | null {
-  try {
-    return new URL(url).origin
-  } catch {
-    return null
-  }
 }
 
 function report(message: string, kind: 'ok' | 'error' | 'info' = 'info'): void {

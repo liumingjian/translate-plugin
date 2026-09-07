@@ -84,10 +84,10 @@ TP_E2E_CLIPBOARD_PROFILE=/tmp/translate-plugin-permission-grant pnpm e2e:workspa
 
 加载扩展：`chrome://extensions` → 打开开发者模式 → 「加载已解压的扩展程序」→ 选 `dist/`。
 
-首次使用需要在扩展的设置页填入 `api-key`；`base_url` 默认 `https://api.vipsyfw.com`，
-文本和截图模型默认 `gpt-5.4-mini`。配置只存 `chrome.storage.local`，不同步到账号。
+首次使用需要在扩展的设置页填入 `base_url` 和 `api-key`；文本和截图模型默认
+`gpt-5.4-mini`。配置只存 `chrome.storage.local`，不同步到账号。
 
-改用其它服务地址时，浏览器会弹窗申请该域名的访问权限 —— 拒绝则配置不会保存。
+配置服务地址时，浏览器会弹窗申请该域名的访问权限 —— 拒绝则配置不会保存。
 
 ## 文档
 
