@@ -60,8 +60,15 @@ export async function runAcceptance(mode) {
       apiKey: 'deterministic-e2e-key',
     }
     if (mode === 'real' && (!service.baseUrl || !service.apiKey)) {
-      safeLog({ ok: true, mode, skipped: 'credentials-unavailable' })
-      return
+      const missing = [
+        service.baseUrl ? null : 'TP_BASE_URL (or OPENAI_BASE_URL)',
+        service.apiKey ? null : 'TP_API_KEY (or OPENAI_API_KEY)',
+      ].filter(Boolean)
+      throw new Error(
+        `real e2e cannot run without credentials: missing ${missing.join(' and ')}; ` +
+          `env file ${service.envFile} ${service.envFileExists ? 'exists but did not supply them' : 'does not exist'}; ` +
+          'set TP_ENV_FILE to point elsewhere',
+      )
     }
 
     const extension = await launchExtension()

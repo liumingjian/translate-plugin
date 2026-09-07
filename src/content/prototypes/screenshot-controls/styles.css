@@ -51,14 +51,17 @@ button { font: inherit; }
   box-shadow: 0 1px 0 rgb(0 0 0 / 0.05);
 }
 
-.reference-crop img {
-  position: absolute;
-  top: -23.08%;
-  left: -6.4%;
-  width: 107.33%;
-  height: auto;
+.reference-crop {
+  padding: 40px 48px;
+  color: #1d1d1f;
+  font-size: 21px;
+  line-height: 1.6;
   user-select: none;
 }
+
+.reference-crop p { margin: 0 0 22px; }
+.reference-crop h2 { margin: 34px 0 0; font-size: 30px; font-weight: 700; }
+.reference-crop a { color: inherit; text-decoration: underline; }
 
 .surface {
   position: absolute;
