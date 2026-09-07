@@ -156,6 +156,8 @@ try {
   assert.equal(await screenshotState(page), 'waiting-for-selection')
   assert.equal(await screenshotHandleCount(page), 8)
   assert.equal(await screenshotModeFocusedName(page), '截图翻译框选')
+  assert.equal(await screenshotToolbarExists(page), false)
+  assert.equal((await screenshotControls(page)).visible, false)
   const firstFrozenSource = await frozenSource(page)
   const firstFrozenMetrics = await frozenMetrics(page)
   const tickBefore = await page.$eval('#ticker', (element) => element.dataset.tick)
@@ -166,24 +168,31 @@ try {
 
   await drag(page, 110, 150, 270, 290)
   assert.equal(await screenshotState(page), 'adjusting-selection')
-  const selectedToolbar = await screenshotToolbarLayout(page)
-  assert(
-    selectedToolbar.textLines.every((lines) => lines === 1),
-    'screenshot toolbar button labels must stay on one line after selecting an area',
-  )
+  const selectedControls = await screenshotControls(page)
+  assert.equal(selectedControls.visible, true)
+  assert.deepEqual(selectedControls.labels, ['取消截图', '确认截图'])
+  assert.deepEqual(selectedControls.symbols, ['×', '✓'])
+  assert(selectedControls.sizes.every(isMinimumTarget), 'selection controls must be 44px targets')
+  assert.equal(selectedControls.rightAligned, true)
+  assert.equal(selectedControls.clearsHandles, true)
   let selection = await screenshotSelection(page)
   assert.deepEqual(selection, { left: 110, top: 150, width: 160, height: 140 })
   const handleDesign = await screenshotHandleDesign(page)
   assert(handleDesign.sizes.every(isMinimumTarget), 'screenshot crop handles must be 44px targets')
   assertHandleCenters(handleDesign.selection, handleDesign.centers)
 
-  await drag(
-    page,
+  await page.mouse.move(
     selection.left + selection.width / 2,
     selection.top + selection.height / 2,
+  )
+  await page.mouse.down()
+  await page.mouse.move(
     selection.left + selection.width / 2 + 20,
     selection.top + selection.height / 2 + 10,
   )
+  assert.equal((await screenshotControls(page)).visible, false)
+  await page.mouse.up()
+  assert.equal((await screenshotControls(page)).visible, true)
   selection = await screenshotSelection(page)
   assert.deepEqual(selection, { left: 130, top: 160, width: 160, height: 140 })
 
@@ -298,17 +307,17 @@ try {
   assert.equal(await page.evaluate(() => document.activeElement?.id), 'focusTarget')
 
   await beginScreenshot(browser, worker, extensionOrigin, page)
-  await page.keyboard.press('Tab')
-  assert.equal(await screenshotModeFocusedName(page), '选择可见区域')
-  await page.keyboard.press('Enter')
+  await page.keyboard.down('Control')
+  await page.keyboard.press('a')
+  await page.keyboard.up('Control')
   const keyboardSelection = await screenshotSelection(page)
-  await page.keyboard.press('ArrowLeft')
-  assert.equal((await screenshotSelection(page)).left, keyboardSelection.left - 1)
+  assert.deepEqual(keyboardSelection, { left: 2, top: 2, width: 896, height: 696 })
+  assert.equal((await screenshotControls(page)).visible, true)
   await page.keyboard.press('Tab')
   assert.equal(await screenshotModeFocusedName(page), '调整上边界')
   await pressShiftArrow(page, 'ArrowDown')
   assert.equal((await screenshotSelection(page)).top, keyboardSelection.top + 10)
-  for (let index = 0; index < 10; index++) await page.keyboard.press('Tab')
+  for (let index = 0; index < 9; index++) await page.keyboard.press('Tab')
   assert.equal(await screenshotModeFocusedName(page), '确认截图')
   await page.keyboard.press('Enter')
   await page.waitForFunction(() => !window.__findScreenshotDialog())
@@ -329,7 +338,8 @@ try {
   assert.equal(requests.length, 3, 'Escape must not create a request')
 
   await beginScreenshot(browser, worker, extensionOrigin, page)
-  await clickShadowButton(page, '取消')
+  await drag(page, 120, 160, 260, 280)
+  await clickShadowButton(page, '取消截图')
   await page.waitForFunction(() => !window.__findScreenshotDialog())
   assert.equal(requests.length, 3, 'the cancel button must not create a request')
 
@@ -337,6 +347,7 @@ try {
   await drag(page, 120, 160, 125, 165)
   assert.match(await screenshotStatus(page), /太小/)
   assert.equal(await shadowButtonDisabled(page, '确认截图'), true)
+  assert.equal((await screenshotControls(page)).visible, false)
   await page.keyboard.press('Enter')
   await doubleClick(page, 122, 162)
   await new Promise((resolve) => setTimeout(resolve, 200))
@@ -379,12 +390,13 @@ try {
   await page.keyboard.press('Escape')
   await page.waitForFunction(() => !window.__findTranslationCard())
   await beginScreenshot(browser, worker, extensionOrigin, page)
-  const narrowToolbar = await screenshotToolbarLayout(page)
-  assertCardInViewport(narrowToolbar.rect, { width: 320, height: 480 })
-  assert(
-    narrowToolbar.textLines.every((lines) => lines === 1),
-    'narrow screenshot toolbar button labels must stay on one line',
-  )
+  assert.equal((await screenshotControls(page)).visible, false)
+  await drag(page, 24, 120, 296, 450)
+  const narrowControls = await screenshotControls(page)
+  assert.equal(narrowControls.visible, true)
+  assertCardInViewport(narrowControls.rect, { width: 320, height: 480 })
+  assert(narrowControls.sizes.every(isMinimumTarget), 'narrow selection controls must be 44px targets')
+  assert.equal(narrowControls.clearsHandles, true)
   await page.keyboard.press('Escape')
   await page.waitForFunction(() => !window.__findScreenshotDialog())
   await page.emulateMediaFeatures([{ name: 'prefers-color-scheme', value: 'light' }])
@@ -662,6 +674,34 @@ async function screenshotStatus(page) {
   )
 }
 
+async function screenshotToolbarExists(page) {
+  return page.evaluate(() => !!window.__findScreenshotDialog()?.querySelector('.toolbar'))
+}
+
+async function screenshotControls(page) {
+  return page.evaluate(() => {
+    const dialog = window.__findScreenshotDialog()
+    const controls = dialog.querySelector('.selection-controls')
+    const selection = dialog.querySelector('[role="group"]').getBoundingClientRect()
+    const box = controls.getBoundingClientRect()
+    const visible = !controls.hidden && box.width > 0 && box.height > 0
+    return {
+      visible,
+      labels: [...controls.querySelectorAll('button')]
+        .map((button) => button.getAttribute('aria-label')),
+      symbols: [...controls.querySelectorAll('button')]
+        .map((button) => button.textContent),
+      sizes: [...controls.querySelectorAll('button')].map((button) => {
+        const rect = button.getBoundingClientRect()
+        return { width: rect.width, height: rect.height }
+      }),
+      rect: { left: box.left, top: box.top, right: box.right, bottom: box.bottom },
+      rightAligned: Math.abs(box.right - selection.right) < 1,
+      clearsHandles: box.bottom <= selection.top - 24 || box.top >= selection.bottom + 24,
+    }
+  })
+}
+
 async function screenshotSelection(page) {
   return page.evaluate(() => {
     const selection = window.__findScreenshotDialog()?.querySelector('[role="group"]')
@@ -693,7 +733,9 @@ async function screenshotCardFocusedName(page) {
 async function clickShadowButton(page, label) {
   const rect = await page.evaluate((text) => {
     const button = [...window.__findScreenshotDialog().querySelectorAll('button')]
-      .find((candidate) => candidate.textContent === text)
+      .find((candidate) =>
+        candidate.textContent === text || candidate.getAttribute('aria-label') === text,
+      )
     const box = button.getBoundingClientRect()
     return { x: box.left + box.width / 2, y: box.top + box.height / 2 }
   }, label)
@@ -703,7 +745,9 @@ async function clickShadowButton(page, label) {
 async function pressShadowButton(page, label) {
   const rect = await page.evaluate((text) => {
     const button = [...window.__findScreenshotDialog().querySelectorAll('button')]
-      .find((candidate) => candidate.textContent === text)
+      .find((candidate) =>
+        candidate.textContent === text || candidate.getAttribute('aria-label') === text,
+      )
     const box = button.getBoundingClientRect()
     return { x: box.left + box.width / 2, y: box.top + box.height / 2 }
   }, label)
@@ -711,7 +755,9 @@ async function pressShadowButton(page, label) {
   await page.mouse.down()
   const transform = await page.evaluate((text) => {
     const button = [...window.__findScreenshotDialog().querySelectorAll('button')]
-      .find((candidate) => candidate.textContent === text)
+      .find((candidate) =>
+        candidate.textContent === text || candidate.getAttribute('aria-label') === text,
+      )
     return getComputedStyle(button).transform
   }, label)
   await page.mouse.up()
@@ -735,32 +781,12 @@ async function screenshotModeDesign(page, selector) {
   }, selector)
 }
 
-async function screenshotToolbarLayout(page) {
-  return page.evaluate(() => {
-    const toolbar = window.__findScreenshotDialog().querySelector('.toolbar')
-    const toolbarRect = toolbar.getBoundingClientRect()
-    const buttons = [...toolbar.querySelectorAll('button')]
-    const textLines = buttons.map((button) => {
-      const range = document.createRange()
-      range.selectNodeContents(button)
-      return new Set([...range.getClientRects()].map((rect) => Math.round(rect.top))).size
-    })
-    return {
-      rect: {
-        left: toolbarRect.left,
-        top: toolbarRect.top,
-        right: toolbarRect.right,
-        bottom: toolbarRect.bottom,
-      },
-      textLines,
-    }
-  })
-}
-
 async function shadowButtonDisabled(page, label) {
   return page.evaluate((text) => {
     const button = [...window.__findScreenshotDialog().querySelectorAll('button')]
-      .find((candidate) => candidate.textContent === text)
+      .find((candidate) =>
+        candidate.textContent === text || candidate.getAttribute('aria-label') === text,
+      )
     return button.disabled
   }, label)
 }
