@@ -17,8 +17,11 @@ const execFileAsync = promisify(execFile)
 
 export function loadRealServiceEnv() {
   const envFile = process.env.TP_ENV_FILE ?? path.join(ROOT, '.env.local')
-  if (fs.existsSync(envFile)) process.loadEnvFile(envFile)
+  const envFileExists = fs.existsSync(envFile)
+  if (envFileExists) process.loadEnvFile(envFile)
   return {
+    envFile,
+    envFileExists,
     baseUrl: process.env.TP_BASE_URL || process.env.OPENAI_BASE_URL || '',
     apiKey: process.env.TP_API_KEY || process.env.OPENAI_API_KEY || '',
   }
