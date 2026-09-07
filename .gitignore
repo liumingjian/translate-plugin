@@ -1,4 +1,7 @@
 node_modules/
 dist/
+/dist.zip
 .vite/
 *.log
+.env
+.env.local

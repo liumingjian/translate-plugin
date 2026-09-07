@@ -2,10 +2,15 @@
 export class SseParser {
   private buffer = ''
   private done = false
+  private finished = false
 
   /** 是否收到过 `[DONE]` —— 用来区分「服务说完了」和「连接被掐断」。 */
   get sawDone(): boolean {
     return this.done
+  }
+
+  get complete(): boolean {
+    return this.done || this.finished
   }
 
   feed(chunk: string): string[] {
@@ -23,6 +28,7 @@ export class SseParser {
         continue
       }
       if (data === '') continue
+      if (finishReasonOf(data) !== null) this.finished = true
       payloads.push(data)
     }
 

@@ -54,4 +54,20 @@ describe('流是否完整（决定要不要进缓存）', () => {
     expect(finishReasonOf('{"choices":[{"delta":{"content":"x"}}]}')).toBeNull()
     expect(finishReasonOf('不是 JSON')).toBeNull()
   })
+
+  it('发出部分 delta 后没有结束标记仍视为断流', () => {
+    const parser = new SseParser()
+    expect(parser.feed(chunk('EN>ZH\n半段')).map(deltaOf)).toEqual(['EN>ZH\n半段'])
+    expect(parser.complete).toBe(false)
+  })
+
+  it('finish_reason 或 [DONE] 都把流标为完整', () => {
+    const byReason = new SseParser()
+    byReason.feed('data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n')
+    expect(byReason.complete).toBe(true)
+
+    const byDone = new SseParser()
+    byDone.feed('data: [DONE]\n\n')
+    expect(byDone.complete).toBe(true)
+  })
 })

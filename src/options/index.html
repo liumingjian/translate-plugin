@@ -17,15 +17,24 @@
       <label for="apiKey">api-key</label>
       <input id="apiKey" type="password" spellcheck="false" placeholder="sk-..." />
 
-      <label for="model">模型</label>
+      <label for="model">文本模型</label>
       <div class="row">
         <input id="model" spellcheck="false" placeholder="gpt-5.4-mini" />
         <button id="fetchModels" type="button" class="ghost">拉取模型列表</button>
       </div>
       <select id="modelSelect" class="hidden" aria-label="已拉取的模型"></select>
 
+      <label for="imageModel">截图模型</label>
+      <input id="imageModel" spellcheck="false" placeholder="gpt-5.4-mini" />
+
+      <section class="privacy-note" aria-labelledby="image-boundary-title">
+        <h2 id="image-boundary-title">图片发送边界</h2>
+        <p>只有你明确确认翻译的图像区域会发送到上方配置的翻译服务。冻结画面、导入图片和截图只在内存中处理，不写入扩展存储，也不进入翻译缓存。</p>
+      </section>
+
       <div class="row">
         <button id="save" type="button" class="primary">保存</button>
+        <button id="shortcuts" type="button" class="ghost">管理快捷键</button>
         <span id="status" class="status"></span>
       </div>
     </main>
