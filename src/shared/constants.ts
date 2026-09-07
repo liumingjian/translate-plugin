@@ -4,7 +4,7 @@ export const MAX_SELECTION_LENGTH = 3000
 /** 译文缓存条数上限（service worker 存活期内有效）。 */
 export const CACHE_CAPACITY = 100
 
-export const DEFAULT_BASE_URL = 'https://api.vipsyfw.com'
+export const DEFAULT_BASE_URL = ''
 export const DEFAULT_MODEL = 'gpt-5.4-mini'
 export const DEFAULT_IMAGE_MODEL = 'gpt-5.4-mini'
 
