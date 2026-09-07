@@ -4,5 +4,9 @@ import manifest from './manifest.config'
 
 export default defineConfig({
   plugins: [crx({ manifest })],
-  build: { target: 'esnext', emptyOutDir: true },
+  build: {
+    target: 'esnext',
+    emptyOutDir: true,
+    rollupOptions: { input: ['src/workspace/index.html'] },
+  },
 })

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { anchorBottomRight } from '../src/shared/position'
+import { anchorBottomRight, constrainToViewport } from '../src/shared/position'
 
 const viewport = { width: 1000, height: 800 }
 const size = { width: 100, height: 50 }
@@ -62,5 +62,25 @@ describe('anchorBottomRight', () => {
     })
     expect(placement.left).toBe(8)
     expect(placement.top).toBe(8)
+  })
+})
+
+describe('constrainToViewport', () => {
+  it('keeps a dragged screenshot card inside every viewport edge', () => {
+    expect(constrainToViewport({
+      left: 950,
+      top: -40,
+      size: { width: 380, height: 460 },
+      viewport,
+    })).toEqual({ left: 612, top: 8 })
+  })
+
+  it('uses the viewport margin when the screenshot card is larger than the viewport', () => {
+    expect(constrainToViewport({
+      left: -100,
+      top: 500,
+      size: { width: 600, height: 600 },
+      viewport: { width: 400, height: 300 },
+    })).toEqual({ left: 8, top: 8 })
   })
 })

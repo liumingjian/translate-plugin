@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>截图翻译</title>
+    <link rel="stylesheet" href="./popup.css" />
+  </head>
+  <body>
+    <main>
+      <button id="screenshot" class="entry primary" type="button">
+        <span class="icon" aria-hidden="true">⌗</span>
+        <span><strong>截图翻译</strong><small>Alt+Shift+S</small></span>
+      </button>
+      <button id="import" class="entry" type="button">
+        <span class="icon" aria-hidden="true">＋</span>
+        <span><strong>导入图片</strong><small>打开图片翻译工作区</small></span>
+      </button>
+      <button id="options" class="entry settings" type="button">
+        <span class="icon" aria-hidden="true">⚙</span>
+        <span><strong>配置页</strong><small>翻译服务与模型</small></span>
+      </button>
+      <p id="status" class="status" role="status"></p>
+    </main>
+    <script type="module" src="./popup.ts"></script>
+  </body>
+</html>
