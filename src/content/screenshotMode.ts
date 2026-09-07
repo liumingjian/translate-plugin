@@ -96,29 +96,59 @@ const SCREENSHOT_STYLES = `
 .handle-sw { bottom: -24px; left: -24px; cursor: nesw-resize; }
 .handle-w { top: calc(50% - 22px); left: -24px; cursor: ew-resize; }
 .handle-nw { top: -24px; left: -24px; cursor: nwse-resize; }
-.toolbar {
+.selection-controls {
   position: absolute;
-  left: 50%;
-  bottom: 24px;
-  transform: translateX(-50%);
-  width: min(560px, calc(100vw - 16px));
-  padding: 10px 12px;
+  z-index: 2;
   display: flex;
+  width: 96px;
+  height: 44px;
   align-items: center;
   gap: 8px;
-  border: 1px solid var(--tp-dark-border);
-  border-radius: 8px;
-  background: rgba(0, 0, 0, .92);
-  color: var(--tp-on-dark);
   cursor: default;
 }
+.selection-controls[hidden] { display: none; }
+.selection-control {
+  display: grid;
+  place-items: center;
+  flex: 0 0 44px;
+  width: 44px;
+  height: 44px;
+  min-height: 44px;
+  padding: 0;
+  border: 1px solid rgba(0, 0, 0, .16);
+  border-radius: 50%;
+  background: rgba(250, 250, 250, .96);
+  color: #303033;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, .24);
+  font-size: 25px;
+  font-weight: 500;
+  line-height: 1;
+  cursor: pointer;
+  transition: background-color 120ms ease, transform 120ms ease;
+}
+.selection-control:hover { background: #ffffff; }
+.selection-control:active { transform: scale(.94); }
+.selection-control.confirm {
+  border-color: var(--tp-primary);
+  background: var(--tp-primary);
+  color: var(--tp-on-dark);
+}
+.selection-control.confirm:hover { background: var(--tp-primary-hover); }
+.selection-control:focus-visible {
+  outline: 3px solid var(--tp-on-dark);
+  outline-offset: 2px;
+}
 .status {
-  flex: 1;
-  font-size: 13px;
-  line-height: 1.4;
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
   white-space: nowrap;
 }
-button {
+.privacy button {
   flex: 0 0 auto;
   min-height: 44px;
   padding: 5px 13px;
@@ -130,12 +160,15 @@ button {
   white-space: nowrap;
   cursor: pointer;
 }
-button:hover:not(:disabled) { background: var(--tp-dark-surface); }
-button:active:not(:disabled) { transform: scale(0.95); }
-button.primary { border-color: var(--tp-primary); background: var(--tp-primary); }
-button.primary:hover:not(:disabled) { border-color: var(--tp-primary-hover); background: var(--tp-primary-hover); }
-button:disabled { opacity: .45; cursor: default; }
-button:focus-visible { outline: 3px solid var(--tp-on-dark); outline-offset: 2px; }
+.privacy button:hover:not(:disabled) { background: var(--tp-dark-surface); }
+.privacy button:active:not(:disabled) { transform: scale(0.95); }
+.privacy button.primary { border-color: var(--tp-primary); background: var(--tp-primary); }
+.privacy button.primary:hover:not(:disabled) {
+  border-color: var(--tp-primary-hover);
+  background: var(--tp-primary-hover);
+}
+.privacy button:disabled { opacity: .45; cursor: default; }
+.privacy button:focus-visible { outline: 3px solid var(--tp-on-dark); outline-offset: 2px; }
 .selection .handle { min-height: 44px; padding: 0; }
 .selection .handle:focus-visible { outline: 2px solid var(--tp-focus); outline-offset: -2px; }
 .privacy {
@@ -155,14 +188,13 @@ button:focus-visible { outline: 3px solid var(--tp-on-dark); outline-offset: 2px
 .privacy h2 { margin: 0 0 10px; font-size: 18px; line-height: 1.4; }
 .privacy p { margin: 0 0 16px; font-size: 14px; line-height: 1.6; }
 .privacy-actions { display: flex; justify-content: flex-end; gap: 8px; }
-.surface[data-state="awaiting-privacy"] .toolbar { opacity: .35; }
 @media (max-width: 420px) {
-  .toolbar { flex-wrap: wrap; bottom: 8px; }
-  .status { width: 100%; flex-basis: 100%; white-space: normal; }
-  .toolbar button { flex: 1 1 auto; }
   .privacy { padding: 17px; }
   .privacy-actions { flex-wrap: wrap; }
   .privacy-actions button { flex: 1 1 auto; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .selection-control { transition: none; }
 }
 `
 
@@ -172,7 +204,7 @@ export class ScreenshotMode {
   private readonly frozenImage = document.createElement('img')
   private readonly selection = document.createElement('div')
   private readonly status = document.createElement('span')
-  private readonly toolbar = document.createElement('div')
+  private readonly controls = document.createElement('div')
   private readonly confirmButton = document.createElement('button')
   private readonly privacyPanel = document.createElement('section')
   private readonly privacyAcceptButton = document.createElement('button')
@@ -180,6 +212,7 @@ export class ScreenshotMode {
   private previousFocus: HTMLElement | null = null
   private imageDataUrl: string | null = null
   private state: ScreenshotModeState = 'exited'
+  private controlsVisible = false
 
   constructor(private readonly handlers: ScreenshotModeHandlers) {
     this.interaction = new CropInteractionController(() => this.render())
@@ -214,25 +247,25 @@ export class ScreenshotMode {
       this.selection.append(element)
     }
 
-    this.toolbar.className = 'toolbar'
-    this.toolbar.addEventListener('pointerdown', (event) => event.stopPropagation())
     this.status.className = 'status'
     this.status.setAttribute('role', 'status')
     this.status.setAttribute('aria-live', 'polite')
-    const selectViewportButton = document.createElement('button')
-    selectViewportButton.type = 'button'
-    selectViewportButton.textContent = '选择可见区域'
-    selectViewportButton.addEventListener('click', () => this.selectViewport())
+    this.controls.className = 'selection-controls'
+    this.controls.hidden = true
+    this.controls.addEventListener('pointerdown', (event) => event.stopPropagation())
     const cancelButton = document.createElement('button')
     cancelButton.type = 'button'
-    cancelButton.textContent = '取消'
+    cancelButton.className = 'selection-control'
+    cancelButton.textContent = '×'
+    cancelButton.setAttribute('aria-label', '取消截图')
     cancelButton.addEventListener('click', () => this.cancel())
-    this.confirmButton.className = 'primary'
+    this.confirmButton.className = 'selection-control confirm'
     this.confirmButton.type = 'button'
-    this.confirmButton.textContent = '确认截图'
+    this.confirmButton.textContent = '✓'
+    this.confirmButton.setAttribute('aria-label', '确认截图')
     this.confirmButton.disabled = true
     this.confirmButton.addEventListener('click', () => this.confirm())
-    this.toolbar.append(this.status, selectViewportButton, cancelButton, this.confirmButton)
+    this.controls.append(cancelButton, this.confirmButton)
 
     this.privacyPanel.className = 'privacy hidden'
     this.privacyPanel.setAttribute('role', 'document')
@@ -253,7 +286,13 @@ export class ScreenshotMode {
     privacyActions.append(privacyCancelButton, this.privacyAcceptButton)
     this.privacyPanel.append(privacyTitle, privacyText, privacyActions)
 
-    this.surface.append(this.frozenImage, this.selection, this.toolbar, this.privacyPanel)
+    this.surface.append(
+      this.frozenImage,
+      this.selection,
+      this.status,
+      this.controls,
+      this.privacyPanel,
+    )
     root.append(style, this.surface)
 
     this.surface.addEventListener('pointerdown', (event) => this.beginSelection(event))
@@ -281,6 +320,8 @@ export class ScreenshotMode {
     this.imageDataUrl = imageDataUrl
     this.frozenImage.src = imageDataUrl
     this.selection.classList.remove('visible')
+    this.controlsVisible = false
+    this.controls.hidden = true
     this.confirmButton.disabled = true
     this.status.textContent = '拖动鼠标创建框选区域'
     this.privacyPanel.classList.toggle('hidden', privacyAccepted)
@@ -301,6 +342,8 @@ export class ScreenshotMode {
     this.frozenImage.removeAttribute('src')
     this.imageDataUrl = null
     this.interaction.setRect(null)
+    this.controlsVisible = false
+    this.controls.hidden = true
     this.privacyPanel.classList.add('hidden')
     const restoreFocus = this.previousFocus
     this.previousFocus = null
@@ -320,6 +363,7 @@ export class ScreenshotMode {
       : 'create')
     this.interaction.setBounds(this.bounds())
     this.interaction.begin(point, action)
+    this.controlsVisible = false
     this.setState('adjusting-selection')
     this.surface.setPointerCapture(event.pointerId)
     this.render()
@@ -334,6 +378,8 @@ export class ScreenshotMode {
   private endSelection(event: PointerEvent): void {
     this.updateSelection(event)
     this.endPointer(event.pointerId)
+    this.controlsVisible = validCrop(this.interaction.getRect())
+    this.render()
   }
 
   private endPointer(pointerId?: number): void {
@@ -353,7 +399,10 @@ export class ScreenshotMode {
 
   private render(): void {
     const rect = this.interaction.getRect()
-    if (!rect) return
+    if (!rect) {
+      this.controls.hidden = true
+      return
+    }
     this.selection.classList.add('visible')
     this.selection.style.left = `${rect.x}px`
     this.selection.style.top = `${rect.y}px`
@@ -368,13 +417,17 @@ export class ScreenshotMode {
     this.status.textContent = valid
       ? `${Math.round(rect.width)} x ${Math.round(rect.height)}，点击确认截图`
       : '框选区域太小，请继续拖动'
+    this.controls.hidden = !valid || !this.controlsVisible
+    if (!this.controls.hidden) this.positionControls(rect)
   }
 
   private selectViewport(): void {
+    if (this.state === 'awaiting-privacy' || this.state === 'submitting') return
     const bounds = this.bounds()
     const inset = Math.min(2, bounds.width / 2, bounds.height / 2)
     this.interaction.setBounds(bounds)
     this.interaction.selectWholeBounds(inset)
+    this.controlsVisible = true
     this.setState('adjusting-selection')
     this.render()
     this.selection.focus({ preventScroll: true })
@@ -386,6 +439,23 @@ export class ScreenshotMode {
     event.stopPropagation()
     this.interaction.setBounds(this.bounds())
     this.interaction.adjust(event.key, event.shiftKey ? 10 : 1, handle)
+    this.controlsVisible = validCrop(this.interaction.getRect())
+    this.render()
+  }
+
+  private positionControls(rect: CropRect): void {
+    const bounds = this.bounds()
+    const width = 96
+    const height = 44
+    const edge = 8
+    const gap = 28
+    const left = clamp(rect.x + rect.width - width, edge, bounds.width - width - edge)
+    const spaceBelow = bounds.height - (rect.y + rect.height)
+    const top = spaceBelow >= height + gap
+      ? rect.y + rect.height + gap
+      : rect.y - height - gap
+    this.controls.style.left = `${left}px`
+    this.controls.style.top = `${clamp(top, edge, bounds.height - height - edge)}px`
   }
 
   private confirm(): void {
@@ -408,7 +478,15 @@ export class ScreenshotMode {
   }
 
   private handleKeydown(event: KeyboardEvent): void {
-    if (!this.active || (event.key !== 'Escape' && event.key !== 'Enter')) return
+    if (!this.active) return
+    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'a') {
+      if (this.state === 'awaiting-privacy' || this.state === 'submitting') return
+      event.preventDefault()
+      event.stopImmediatePropagation()
+      this.selectViewport()
+      return
+    }
+    if (event.key !== 'Escape' && event.key !== 'Enter') return
     if (event.key === 'Enter' && event.composedPath()[0] instanceof HTMLButtonElement) return
     event.preventDefault()
     event.stopImmediatePropagation()
@@ -419,7 +497,7 @@ export class ScreenshotMode {
   private setState(state: ScreenshotModeState): void {
     this.state = state
     this.surface.dataset.state = state
-    this.toolbar.inert = state === 'awaiting-privacy'
+    this.controls.inert = state === 'awaiting-privacy'
     this.privacyPanel.inert = state !== 'awaiting-privacy'
   }
 
@@ -437,4 +515,8 @@ export class ScreenshotMode {
 
 function isArrowKey(key: string): key is import('../shared/crop').ArrowKey {
   return key === 'ArrowLeft' || key === 'ArrowRight' || key === 'ArrowUp' || key === 'ArrowDown'
+}
+
+function clamp(value: number, minimum: number, maximum: number): number {
+  return Math.min(Math.max(value, minimum), maximum)
 }
