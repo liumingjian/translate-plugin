@@ -14,7 +14,8 @@ pnpm build      # 类型检查 + 生产构建
 pnpm test       # 纯函数单测
 pnpm e2e        # 确定性本地服务：划词与图片导入主链路
 pnpm e2e:deterministic # 运行全部确定性 Chrome 验收场景
-pnpm e2e:real   # 从主工作区 .env.local 读取凭据，使用固定素材验真实服务
+pnpm e2e:real   # 从仓库根 .env.local 读取凭据，使用固定素材验真实服务
+pnpm e2e:permissions # 生产构建的权限验收：不夹带测试权限，且失败必可见
 pnpm e2e:icon   # 只验划词图标出不出来，不需要 api-key（需要先 pnpm build）
 ```
 
@@ -27,6 +28,14 @@ iframe 的浮层挂在框架自己身上、卡片会被框架视口夹住，见 
 `pnpm e2e:real` 复用同一套用户流程，只向真实服务发送 `tests/fixtures/` 中的固定素材，
 并验证文本模型与截图模型 `gpt-5.4-mini`。凭据优先读取 `TP_BASE_URL` / `TP_API_KEY`，
 缺少时回退到 `OPENAI_BASE_URL` / `OPENAI_API_KEY`；所有输出均不包含凭据、授权头或图片数据。
+凭据文件默认取仓库根的 `.env.local`，`TP_ENV_FILE` 可指向任意绝对路径 —— 把它放在仓库之外，
+同步或清理工作区的工具就删不掉它。两个变量缺任一时测试直接失败，不会跳过后报成功。
+
+`pnpm e2e:permissions` 只跑生产构建。其余 e2e 都构建 `--mode e2e`，那份 manifest 额外声明
+`<all_urls>`，`captureVisibleTab` 因此在测试里总能成功 —— 用户实际依赖的 `activeTab` 授权
+从未被验证过。该脚本断言发布产物保留 `activeTab`、不夹带 `<all_urls>` 与 localhost 权限，
+并要求点击弹窗入口后要么进入截图模式、要么显示错误。它不断言捕获成功：`activeTab` 只在真实
+点击工具栏图标时授予，`chrome.action.openPopup()` 复现不了。静默无反应才是永远的 bug。
 
 驱动 Chrome 有两个坑，改这个脚本前先看清楚：
 
