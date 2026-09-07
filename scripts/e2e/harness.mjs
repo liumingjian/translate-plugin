@@ -16,7 +16,7 @@ export const CHROME =
 const execFileAsync = promisify(execFile)
 
 export function loadRealServiceEnv() {
-  const envFile = process.env.TP_ENV_FILE ?? path.join(path.dirname(ROOT), 'translate-plugin', '.env.local')
+  const envFile = process.env.TP_ENV_FILE ?? path.join(ROOT, '.env.local')
   if (fs.existsSync(envFile)) process.loadEnvFile(envFile)
   return {
     baseUrl: process.env.TP_BASE_URL || process.env.OPENAI_BASE_URL || '',
